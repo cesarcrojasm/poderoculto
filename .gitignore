@@ -1,3 +1,16 @@
 *
 !.gitignore
 !README.md
+!/frontend/
+!/frontend/**
+/frontend/node_modules/
+/frontend/dist/
+/frontend/coverage/
+/frontend/.env*
+!/frontend/.env.example
+!/supabase/
+!/supabase/**
+!/specifications/
+!/specifications/**
+!/vercel.json
+specifications/
