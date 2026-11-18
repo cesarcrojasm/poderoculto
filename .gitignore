@@ -10,6 +10,8 @@
 !/frontend/.env.example
 !/supabase/
 !/supabase/**
+/supabase/.branches/
+/supabase/.temp/
 !/specifications/
 !/specifications/**
 !/vercel.json
