@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { PRODUCTS } from './data/catalog'
 import { cartTotal, formatPrice, makeOrderMessage, readCart, whatsappUrl } from './lib/commerce'
 import { hasSupabase, loadProducts, saveOrder } from './lib/supabase'
 import Brand from './components/Brand'
 import ProductCard from './components/ProductCard'
 import BraceletDesigner from './components/BraceletDesigner'
-import Admin from './components/Admin'
+const Admin = lazy(() => import('./components/Admin'))
 
 const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || '573214411674'
 
@@ -75,7 +75,6 @@ function Storefront() {
     setCart((current) => [...current, { cartId: `custom-${Date.now()}`, type: 'custom', name: 'Manilla personalizada', price, quantity: 1, configuration }])
     setCartOpen(true)
   }
-  if (window.location.pathname === '/admin' || window.location.pathname === '/admin/') return <Admin />
   return <>
     <header className="site-header"><div className="header-inner"><Brand /><nav className="main-nav" aria-label="Navegación principal"><a href="#catalogo">Manillas</a><a href="#crear">Diseña la tuya</a><a href="#historia">Nuestra esencia</a></nav><div className="header-actions"><a className="instagram-link" href="https://instagram.com/poder_oculto7" target="_blank" rel="noreferrer">Instagram <span aria-hidden="true">↗</span></a><button className="cart-trigger" aria-label={`Abrir carrito, ${cartCount} artículos`} onClick={() => setCartOpen(true)}><span aria-hidden="true">♧</span><span className="cart-count">{cartCount}</span></button></div></div></header>
     <main>
@@ -96,5 +95,6 @@ function Storefront() {
 }
 
 export default function App() {
-  return window.location.pathname.startsWith('/admin') ? <Admin /> : <Storefront />
+  if (window.location.pathname.startsWith('/admin')) return <Suspense fallback={<main className="admin-page"><p>Cargando panel…</p></main>}><Admin /></Suspense>
+  return <Storefront />
 }

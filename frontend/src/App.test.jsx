@@ -1,6 +1,14 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('./lib/supabase', () => ({
+  hasSupabase: false,
+  supabase: null,
+  loadProducts: vi.fn().mockResolvedValue(null),
+  loadDesignerOptions: vi.fn().mockResolvedValue(null),
+  saveOrder: vi.fn().mockResolvedValue({ saved: false, reason: 'demo' }),
+}))
+
 import App from './App'
 
 beforeEach(() => {

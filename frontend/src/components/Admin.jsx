@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import Brand from './Brand'
+import './admin-products.css'
 import { formatPrice } from '../lib/commerce'
+import { getNextProductOrder, getProductOrderUpdates, getStorageObjectPath, hasUnsavedProductOrder, isValidProductImage, moveItem } from '../lib/adminProducts'
 import { hasSupabase, supabase } from '../lib/supabase'
 
 const TABLES = [
@@ -24,32 +29,170 @@ function LoginForm() {
   return <form className="admin-login" onSubmit={submit}><Brand /><span className="eyebrow">ACCESO PRIVADO</span><h1>Panel de gestión</h1><label>Correo<input required type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Contraseña<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><button className="button button-primary full-width">Iniciar sesión</button>{error && <p role="alert" className="form-status error-text">{error}</p>}</form>
 }
 
-function ProductsPanel() {
+function SortableProductCard({ product, onChange, onSave, onUpload, onDelete, onDeletePhoto }) {
+  const [photoIndex, setPhotoIndex] = useState(0)
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: product.id })
+  const photos = [...(product.producto_fotos || [])].sort((a, b) => a.orden - b.orden)
+  const photo = photos[photoIndex]
+  useEffect(() => setPhotoIndex((current) => Math.min(current, Math.max(photos.length - 1, 0))), [photos.length])
+  return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1 }} className="admin-product-card">
+    <div className="admin-product-preview">
+      {photo ? <img src={photo.url} alt={`${product.nombre}, foto ${photoIndex + 1}`} /> : <div className="admin-no-photo"><img src="/brand/mark.svg" alt="" /><span>Sin fotos</span></div>}
+      {photos.length > 1 && <div className="admin-photo-controls"><button aria-label={`Foto anterior ${product.nombre}`} onClick={() => setPhotoIndex((photoIndex + photos.length - 1) % photos.length)}>‹</button><span>{photoIndex + 1} / {photos.length}</span><button aria-label={`Foto siguiente ${product.nombre}`} onClick={() => setPhotoIndex((photoIndex + 1) % photos.length)}>›</button></div>}
+      {photo && <div className="admin-photo-actions"><button className="delete-photo" aria-label={`Eliminar foto ${product.nombre}`} onClick={() => onDeletePhoto(product, photo)}>Eliminar foto</button></div>}
+    </div>
+    <div className="admin-product-fields"><div className="admin-product-title"><button className="admin-drag-handle" aria-label={`Reordenar producto ${product.nombre}`} title="Arrastra para reordenar" {...attributes} {...listeners}>⠿</button><input aria-label={`Nombre ${product.nombre}`} value={product.nombre} onChange={(event) => onChange(product.id, 'nombre', event.target.value)} /></div>
+      <label>Descripción<textarea aria-label={`Descripción ${product.nombre}`} value={product.descripcion || ''} onChange={(event) => onChange(product.id, 'descripcion', event.target.value)} /></label>
+      <div className="admin-product-meta"><label>Precio COP<input aria-label={`Precio ${product.nombre}`} type="number" min="0" step="1" value={product.precio} onChange={(event) => onChange(product.id, 'precio', event.target.value)} /></label><label className="admin-available"><input aria-label={`Disponible ${product.nombre}`} type="checkbox" checked={product.disponible} onChange={(event) => onChange(product.id, 'disponible', event.target.checked)} /> Disponible</label></div>
+      <div className="admin-product-actions"><label className="button button-outline button-small upload-button">＋ Agregar fotos<input aria-label={`Subir foto ${product.nombre}`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { onUpload(product, [...(event.target.files || [])]); event.target.value = '' }} /></label><button className="button button-dark button-small" onClick={() => onSave(product)}>Guardar</button><button className="button button-danger button-small" onClick={() => onDelete(product)}>Eliminar producto</button></div>
+    </div>
+  </article>
+}
+
+export function ProductsPanel({ client = supabase }) {
   const [products, setProducts] = useState([])
+  const [savedOrder, setSavedOrder] = useState([])
+  const orderDirty = hasUnsavedProductOrder(products, savedOrder)
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showNewProduct, setShowNewProduct] = useState(false)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const refresh = async () => {
-    const { data, error } = await supabase.from('productos').select('*,producto_fotos(url,orden)').order('orden')
+    setLoading(true)
+    const { data, error } = await client.from('productos').select('*,producto_fotos(url,orden)').order('orden').order('id')
+    setLoading(false)
     if (error) setMessage('No fue posible cargar los productos. Revisa los permisos de Supabase.')
-    else setProducts(data || [])
+    else {
+      const loaded = data || []
+      setSavedOrder(loaded.map((product) => product.id))
+      if (orderDirty) {
+        const byId = new Map(loaded.map((product) => [product.id, product]))
+        const pendingOrder = products.map((product) => byId.get(product.id)).filter(Boolean)
+        const pendingIds = new Set(pendingOrder.map((product) => product.id))
+        setProducts([...pendingOrder, ...loaded.filter((product) => !pendingIds.has(product.id))])
+      } else setProducts(loaded)
+    }
   }
   useEffect(() => { refresh() }, [])
   const changeProduct = (id, key, value) => setProducts((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item))
   const saveProduct = async (product) => {
-    const { error } = await supabase.from('productos').update({ nombre: product.nombre, descripcion: product.descripcion, precio: Number(product.precio), disponible: product.disponible }).eq('id', product.id)
+    const { error } = await client.from('productos').update({ nombre: product.nombre.trim(), descripcion: product.descripcion || '', precio: Number(product.precio), disponible: product.disponible }).eq('id', product.id)
     setMessage(error ? 'No se pudo guardar el producto.' : 'Cambios guardados.')
+    if (!error) refresh()
   }
-  const uploadPhoto = async (product, file) => {
-    if (!file) return
-    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) { setMessage('Elige una imagen de hasta 5 MB.'); return }
-    const path = `${product.id}/${Date.now()}-${file.name.replace(/[^\w.-]/g, '-')}`
-    const { error: uploadError } = await supabase.storage.from('productos').upload(path, file, { upsert: false })
-    if (uploadError) { setMessage('No se pudo subir la foto. Comprueba que exista el bucket productos.'); return }
-    const { data } = supabase.storage.from('productos').getPublicUrl(path)
-    const { error } = await supabase.from('producto_fotos').insert({ producto_id: product.id, url: data.publicUrl, orden: (product.producto_fotos?.length || 0) + 1 })
-    setMessage(error ? 'La foto se subió, pero no se pudo asociar al producto.' : 'Foto agregada.')
-    refresh()
+  const uploadFiles = async (product, files) => {
+    if (!files.length) return
+    if (files.some((file) => !isValidProductImage(file))) { setMessage('Elige imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.'); return }
+    setSaving(true)
+    const currentOrder = (product.producto_fotos || []).reduce((max, photo) => Math.max(max, photo.orden || 0), 0)
+    for (const [index, file] of files.entries()) {
+      const path = `${product.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '-')}`
+      const { error: uploadError } = await client.storage.from('productos').upload(path, file, { upsert: false })
+      if (uploadError) { setMessage('No se pudo subir la foto. Comprueba que exista el bucket productos.'); break }
+      const { data } = client.storage.from('productos').getPublicUrl(path)
+      const { error } = await client.from('producto_fotos').insert({ producto_id: product.id, url: data.publicUrl, orden: currentOrder + index + 1 })
+      if (error) {
+        await client.storage.from('productos').remove([path])
+        setMessage('La foto se subió, pero no se pudo asociar al producto.')
+        break
+      }
+      setMessage('Foto agregada.')
+    }
+    setSaving(false)
+    await refresh()
   }
-  return <div className="admin-table-wrap">{message && <p className="notice" role="status">{message}</p>}<table className="admin-table"><thead><tr><th>Producto</th><th>Precio COP</th><th>Disponible</th><th>Fotos</th><th /></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><input aria-label={`Nombre ${product.nombre}`} value={product.nombre} onChange={(event) => changeProduct(product.id, 'nombre', event.target.value)} /><textarea aria-label={`Descripción ${product.nombre}`} value={product.descripcion || ''} onChange={(event) => changeProduct(product.id, 'descripcion', event.target.value)} /></td><td><input aria-label={`Precio ${product.nombre}`} type="number" min="0" value={product.precio} onChange={(event) => changeProduct(product.id, 'precio', event.target.value)} /></td><td><input aria-label={`Disponible ${product.nombre}`} type="checkbox" checked={product.disponible} onChange={(event) => changeProduct(product.id, 'disponible', event.target.checked)} /></td><td><span>{product.producto_fotos?.length || 0}</span><label className="upload-button">Subir<input aria-label={`Subir foto ${product.nombre}`} type="file" accept="image/*" onChange={(event) => uploadPhoto(product, event.target.files?.[0])} /></label></td><td><button className="button button-outline button-small" onClick={() => saveProduct(product)}>Guardar</button></td></tr>)}</tbody></table></div>
+  const deletePhoto = async (product, photo) => {
+    if (!window.confirm(`¿Eliminar esta foto de “${product.nombre}”?`)) return
+    const path = getStorageObjectPath(photo.url)
+    if (path) {
+      const { error } = await client.storage.from('productos').remove([path])
+      if (error) { setMessage('No se pudo eliminar el archivo de Storage.'); return }
+    }
+    const { error } = await client.from('producto_fotos').delete().eq('id', photo.id)
+    if (error) { setMessage('No se pudo eliminar la foto del producto.'); return }
+    setProducts((current) => current.map((item) => item.id === product.id ? { ...item, producto_fotos: item.producto_fotos.filter((entry) => entry.id !== photo.id).map((entry, index) => ({ ...entry, orden: index + 1 })) } : item))
+    setMessage('Foto eliminada.')
+    const remaining = product.producto_fotos.filter((entry) => entry.id !== photo.id)
+    await Promise.all(remaining.map((entry, index) => client.from('producto_fotos').update({ orden: index + 1 }).eq('id', entry.id)))
+  }
+  const deleteProduct = async (product) => {
+    if (!window.confirm(`¿Eliminar “${product.nombre}” y todas sus fotos? Esta acción no se puede deshacer.`)) return
+    const paths = (product.producto_fotos || []).map((photo) => getStorageObjectPath(photo.url)).filter(Boolean)
+    if (paths.length) {
+      const { error } = await client.storage.from('productos').remove(paths)
+      if (error) { setMessage('No se pudieron eliminar sus fotos de Storage; el producto se conservó.'); return }
+    }
+    const { error } = await client.from('productos').delete().eq('id', product.id)
+    if (error) { setMessage('No se pudo eliminar el producto.'); return }
+    setProducts((current) => current.filter((item) => item.id !== product.id))
+    setMessage('Producto eliminado.')
+  }
+  const reorderProducts = ({ active, over }) => {
+    if (!over || active.id === over.id) return
+    setProducts((current) => moveItem(current, active.id, over.id))
+    setMessage('El orden cambió en el panel. Pulsa “Guardar orden” para aplicarlo en la tienda.')
+  }
+  const saveProductOrder = async () => {
+    const updates = getProductOrderUpdates(products)
+    const ordersById = new Map(updates.map(({ id, orden }) => [id, orden]))
+    const withOrder = products.map((product) => ({ ...product, orden: ordersById.get(product.id) }))
+    setSaving(true)
+    const results = await Promise.all(updates.map(({ id, orden }) => client.from('productos').update({ orden }).eq('id', id)))
+    setSaving(false)
+    if (results.some((result) => result.error)) { setMessage('No se pudo guardar el orden. Se volverá a cargar el catálogo.'); await refresh() }
+    else {
+      setProducts(withOrder)
+      setSavedOrder(withOrder.map((product) => product.id))
+      setMessage('Orden de productos guardado y publicado en la tienda.')
+    }
+  }
+  const createProduct = async (event) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new window.FormData(formElement)
+    const files = Array.from(formElement.elements.namedItem('photos')?.files || [])
+    const name = String(form.get('name') || '').trim()
+    const price = Number(form.get('price'))
+    if (!name) { setMessage('Escribe el nombre del producto.'); return }
+    if (!Number.isInteger(price) || price < 0) { setMessage('Escribe un precio entero válido.'); return }
+    if (!files.length) { setMessage('Selecciona al menos una foto.'); return }
+    if (files.some((file) => !isValidProductImage(file))) { setMessage('Elige imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.'); return }
+    setSaving(true)
+    const newProduct = { id: crypto.randomUUID(), nombre: name, descripcion: String(form.get('description') || '').trim(), precio: price, disponible: form.get('available') === 'on', orden: getNextProductOrder(products) }
+    const { error: createError } = await client.from('productos').insert(newProduct)
+    if (createError) { setSaving(false); setMessage('No se pudo crear el producto.'); return }
+    let uploadError = false
+    const uploadedPaths = []
+    for (const [index, file] of files.entries()) {
+      const path = `${newProduct.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '-')}`
+      const { error } = await client.storage.from('productos').upload(path, file, { upsert: false })
+      if (error) { uploadError = true; break }
+      uploadedPaths.push(path)
+      const { data } = client.storage.from('productos').getPublicUrl(path)
+      const { error: photoError } = await client.from('producto_fotos').insert({ producto_id: newProduct.id, url: data.publicUrl, orden: index + 1 })
+      if (photoError) { uploadError = true; break }
+    }
+    if (uploadError) {
+      if (uploadedPaths.length) await client.storage.from('productos').remove(uploadedPaths)
+      await client.from('productos').delete().eq('id', newProduct.id)
+      setSaving(false)
+      setMessage('No se pudo completar el alta. Se limpió el producto incompleto; verifica Storage y vuelve a intentar.')
+      return
+    }
+    formElement.reset()
+    setShowNewProduct(false)
+    setSaving(false)
+    setMessage('Producto creado.')
+    await refresh()
+  }
+  return <section className="products-admin">
+    <div className="products-admin-toolbar"><div><h2>Catálogo de productos</h2><p>Arrastra las tarjetas para cambiar el orden. Guarda los cambios para publicarlos en la tienda.</p></div><div className="products-admin-actions">{orderDirty && <button className="button button-dark" onClick={saveProductOrder} disabled={saving}>Guardar orden</button>}<button className="button button-primary" onClick={() => setShowNewProduct((visible) => !visible)} disabled={saving}>{showNewProduct ? 'Cancelar' : '+ Nuevo producto'}</button></div></div>
+    {message && <p className="notice" role="status">{message}</p>}
+    {showNewProduct && <form className="new-product-form" onSubmit={createProduct}><h3>Agregar producto</h3><label>Nombre *<input name="name" required maxLength="100" /></label><label>Precio (COP) *<input name="price" type="number" required min="0" step="1" /></label><label>Descripción<textarea name="description" maxLength="1000" /></label><label className="new-product-available"><input name="available" type="checkbox" defaultChecked /> Disponible en la tienda</label><label className="new-product-photos">Fotos *<input name="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required /></label><small>Selecciona una o más imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.</small><button className="button button-dark" type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Crear producto'}</button></form>}
+    {loading ? <p>Cargando productos…</p> : !products.length ? <p>Aún no hay productos. Crea el primero con el botón “Nuevo producto”.</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderProducts}><SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-products-grid">{products.map((product) => <SortableProductCard key={product.id} product={product} onChange={changeProduct} onSave={saveProduct} onUpload={uploadFiles} onDelete={deleteProduct} onDeletePhoto={deletePhoto} />)}</div></SortableContext></DndContext>}
+    {saving && <p role="status" className="admin-saving">Guardando cambios…</p>}
+  </section>
 }
 
 function OptionsPanel() {
@@ -109,5 +252,5 @@ export default function Admin() {
   if (!hasSupabase) return <main className="admin-page"><Brand /><div className="setup-card"><span className="eyebrow">CONFIGURACIÓN PENDIENTE</span><h1>Conecta Supabase</h1><p>Agrega <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> en el entorno de Vercel para activar el panel y guardar pedidos. Ejecuta primero <code>supabase/schema.sql</code> en el SQL Editor.</p><a className="button button-dark" href="/">Volver a la tienda</a></div></main>
   if (!authReady) return <main className="admin-page"><p>Cargando panel…</p></main>
   if (!session) return <main className="admin-page"><a className="back-link" href="/">← Volver a la tienda</a><LoginForm /></main>
-  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['opciones', 'Personalización'], ['pedidos', 'Pedidos']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel /> : tab === 'opciones' ? <OptionsPanel /> : <OrdersPanel />}</main>
+  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['opciones', 'Personalización'], ['pedidos', 'Pedidos']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel client={supabase} /> : tab === 'opciones' ? <OptionsPanel /> : <OrdersPanel />}</main>
 }

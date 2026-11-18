@@ -7,7 +7,7 @@ export const hasSupabase = Boolean(supabase)
 
 export async function loadProducts() {
   if (!supabase) return null
-  const { data, error } = await supabase.from('productos').select('id,nombre,descripcion,precio,disponible,producto_fotos(url,orden)').eq('disponible', true).order('orden')
+  const { data, error } = await supabase.from('productos').select('id,nombre,descripcion,precio,disponible,producto_fotos(url,orden)').eq('disponible', true).order('orden').order('id')
   if (error) throw error
   return data.map((row) => ({
     id: String(row.id), name: row.nombre, description: row.descripcion || '', price: Number(row.precio),
