@@ -1,11 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProductsPanel } from './Admin'
 
-const database = { products: [], photos: [], storage: new Set(), id: 0 }
+const database = { products: [], photos: [], categories: [], storage: new Set(), id: 0 }
 
-function makeClient() {
+function makeClient({ failCategoryInsert = false, failCategoryUpdate = false } = {}) {
   const client = {
     from(table) {
       let operation = 'select'
@@ -20,6 +20,7 @@ function makeClient() {
         eq(key, value) { filters[key] = value; return this },
         then(resolve, reject) {
           let data = null
+          let error = null
           if (table === 'productos') {
             if (operation === 'select') data = database.products.map((product) => ({ ...product, producto_fotos: database.photos.filter((photo) => photo.producto_id === product.id) }))
             if (operation === 'insert') database.products.push(values)
@@ -34,7 +35,23 @@ function makeClient() {
             if (operation === 'update') Object.assign(database.photos.find((photo) => photo.id === filters.id), values)
             if (operation === 'delete') database.photos = database.photos.filter((photo) => photo.id !== filters.id)
           }
-          return Promise.resolve({ data, error: null }).then(resolve, reject)
+          if (table === 'categorias') {
+            if (operation === 'select') data = [...database.categories].sort((a, b) => a.nombre.localeCompare(b.nombre))
+            if (operation === 'insert') {
+              if (failCategoryInsert || database.categories.some((category) => category.id === values.id || category.nombre === values.nombre)) error = { message: 'duplicate' }
+              else database.categories.push(values)
+            }
+            if (operation === 'update') {
+              const existing = database.categories.find((category) => category.id === filters.id)
+              if (failCategoryUpdate || database.categories.some((category) => category.id !== filters.id && category.nombre === values.nombre)) error = { message: 'duplicate' }
+              else Object.assign(existing, values)
+            }
+            if (operation === 'delete') {
+              database.categories = database.categories.filter((category) => category.id !== filters.id)
+              database.products.filter((product) => product.categoria_id === filters.id).forEach((product) => { product.categoria_id = null })
+            }
+          }
+          return Promise.resolve({ data, error }).then(resolve, reject)
         },
       }
       return builder
@@ -49,11 +66,12 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  database.products = [{ id: '1', nombre: 'Prueba', descripcion: 'Descripción', precio: 20000, disponible: true, orden: 1 }]
+  database.products = [{ id: '1', nombre: 'Prueba', descripcion: 'Descripción', precio: 20000, disponible: true, orden: 1, categoria_id: null }]
   database.photos = [
     { id: 'p1', producto_id: '1', url: '/products/1.1.jpeg', orden: 1 },
     { id: 'p2', producto_id: '1', url: '/products/1.2.jpeg', orden: 2 },
   ]
+  database.categories = [{ id: 'clasica', nombre: 'Clásica' }, { id: 'colombiana', nombre: 'Colombiana' }]
   database.storage = new Set()
   database.id = 0
   vi.stubGlobal('confirm', () => true)
@@ -115,5 +133,52 @@ describe('admin product management', () => {
     expect(database.photos).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: 'Eliminar producto' }))
     await waitFor(() => expect(database.products).toHaveLength(0))
+  })
+
+  it('lets a product be assigned to a category, defaulting to "Sin categoría"', async () => {
+    const user = userEvent.setup()
+    render(<ProductsPanel client={makeClient()} />)
+    const select = await screen.findByLabelText('Categoría Prueba')
+    expect(select).toHaveValue('')
+    await user.selectOptions(select, 'colombiana')
+    const productCard = select.closest('.admin-product-card')
+    await user.click(within(productCard).getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(database.products[0].categoria_id).toBe('colombiana'))
+  })
+
+  it('creates, renames and deletes categories, reassigning their products to "Sin categoría"', async () => {
+    const user = userEvent.setup()
+    render(<ProductsPanel client={makeClient()} />)
+    await screen.findAllByText('0 productos')
+    await user.type(screen.getByLabelText('Nueva categoría'), 'Edición especial')
+    await user.click(screen.getByRole('button', { name: 'Crear categoría' }))
+    expect(await screen.findByText('Categoría creada.')).toBeInTheDocument()
+    expect(database.categories.some((category) => category.id === 'edicion-especial' && category.nombre === 'Edición especial')).toBe(true)
+    const select = screen.getByLabelText('Categoría Prueba')
+    await user.selectOptions(select, 'colombiana')
+    await user.click(within(select.closest('.admin-product-card')).getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(database.products[0].categoria_id).toBe('colombiana'))
+    const nameInput = screen.getByLabelText('Nombre categoría Colombiana')
+    const categoryRow = nameInput.closest('.admin-category-row')
+    expect(within(categoryRow).getByText('1 productos')).toBeInTheDocument()
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Colombia 🇨🇴')
+    await user.click(within(categoryRow).getByRole('button', { name: 'Guardar' }))
+    expect(await screen.findByText('Categoría guardada.')).toBeInTheDocument()
+    expect(database.categories.find((category) => category.id === 'colombiana').nombre).toBe('Colombia 🇨🇴')
+    await user.click(within(categoryRow).getByRole('button', { name: 'Eliminar' }))
+    expect(await screen.findByText('Categoría eliminada. Los productos quedaron sin categoría.')).toBeInTheDocument()
+    expect(database.categories.some((category) => category.id === 'colombiana')).toBe(false)
+    expect(database.products[0].categoria_id).toBeNull()
+  })
+
+  it('rejects a category name that produces a duplicate slug', async () => {
+    const user = userEvent.setup()
+    render(<ProductsPanel client={makeClient()} />)
+    await screen.findByLabelText('Nombre categoría Clásica')
+    await user.type(screen.getByLabelText('Nueva categoría'), 'Clásica')
+    await user.click(screen.getByRole('button', { name: 'Crear categoría' }))
+    expect(await screen.findByText(/no se pudo crear la categoría/i)).toBeInTheDocument()
+    expect(database.categories).toHaveLength(2)
   })
 })

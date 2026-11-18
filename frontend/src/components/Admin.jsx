@@ -29,7 +29,7 @@ function LoginForm() {
   return <form className="admin-login" onSubmit={submit}><Brand /><span className="eyebrow">ACCESO PRIVADO</span><h1>Panel de gestión</h1><label>Correo<input required type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Contraseña<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><button className="button button-primary full-width">Iniciar sesión</button>{error && <p role="alert" className="form-status error-text">{error}</p>}</form>
 }
 
-function SortableProductCard({ product, onChange, onSave, onUpload, onDelete, onDeletePhoto }) {
+function SortableProductCard({ product, categories, onChange, onSave, onUpload, onDelete, onDeletePhoto }) {
   const [photoIndex, setPhotoIndex] = useState(0)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: product.id })
   const photos = [...(product.producto_fotos || [])].sort((a, b) => a.orden - b.orden)
@@ -43,6 +43,7 @@ function SortableProductCard({ product, onChange, onSave, onUpload, onDelete, on
     </div>
     <div className="admin-product-fields"><div className="admin-product-title"><button className="admin-drag-handle" aria-label={`Reordenar producto ${product.nombre}`} title="Arrastra para reordenar" {...attributes} {...listeners}>⠿</button><input aria-label={`Nombre ${product.nombre}`} value={product.nombre} onChange={(event) => onChange(product.id, 'nombre', event.target.value)} /></div>
       <label>Descripción<textarea aria-label={`Descripción ${product.nombre}`} value={product.descripcion || ''} onChange={(event) => onChange(product.id, 'descripcion', event.target.value)} /></label>
+      <label>Categoría<select aria-label={`Categoría ${product.nombre}`} value={product.categoria_id || ''} onChange={(event) => onChange(product.id, 'categoria_id', event.target.value || null)}><option value="">Sin categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.nombre}</option>)}</select></label>
       <div className="admin-product-meta"><label>Precio COP<input aria-label={`Precio ${product.nombre}`} type="number" min="0" step="1" value={product.precio} onChange={(event) => onChange(product.id, 'precio', event.target.value)} /></label><label className="admin-available"><input aria-label={`Disponible ${product.nombre}`} type="checkbox" checked={product.disponible} onChange={(event) => onChange(product.id, 'disponible', event.target.checked)} /> Disponible</label></div>
       <div className="admin-product-actions"><label className="button button-outline button-small upload-button">＋ Agregar fotos<input aria-label={`Subir foto ${product.nombre}`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { onUpload(product, [...(event.target.files || [])]); event.target.value = '' }} /></label><button className="button button-dark button-small" onClick={() => onSave(product)}>Guardar</button><button className="button button-danger button-small" onClick={() => onDelete(product)}>Eliminar producto</button></div>
     </div>
@@ -51,6 +52,8 @@ function SortableProductCard({ product, onChange, onSave, onUpload, onDelete, on
 
 export function ProductsPanel({ client = supabase }) {
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [categoryName, setCategoryName] = useState('')
   const [savedOrder, setSavedOrder] = useState([])
   const orderDirty = hasUnsavedProductOrder(products, savedOrder)
   const [message, setMessage] = useState('')
@@ -60,8 +63,13 @@ export function ProductsPanel({ client = supabase }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const refresh = async () => {
     setLoading(true)
-    const { data, error } = await client.from('productos').select('*,producto_fotos(url,orden)').order('orden').order('id')
+    const [{ data, error }, { data: categoryData, error: categoryError }] = await Promise.all([
+      client.from('productos').select('*,producto_fotos(url,orden)').order('orden').order('id'),
+      client.from('categorias').select('id,nombre').order('nombre'),
+    ])
     setLoading(false)
+    if (categoryError) { setCategories([]); setMessage('No fue posible cargar categorías. Ejecuta la migración de categorías en Supabase.') }
+    else setCategories(categoryData || [])
     if (error) setMessage('No fue posible cargar los productos. Revisa los permisos de Supabase.')
     else {
       const loaded = data || []
@@ -76,8 +84,35 @@ export function ProductsPanel({ client = supabase }) {
   }
   useEffect(() => { refresh() }, [])
   const changeProduct = (id, key, value) => setProducts((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item))
+  const createCategory = async (event) => {
+    event.preventDefault()
+    const name = categoryName.trim()
+    const id = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (!name || !id) { setMessage('Escribe un nombre válido para la categoría.'); return }
+    const { error } = await client.from('categorias').insert({ id, nombre: name })
+    if (error) { setMessage('No se pudo crear la categoría. Verifica que el nombre o su identificador no estén repetidos.'); return }
+    setCategoryName('')
+    setMessage('Categoría creada.')
+    await refresh()
+  }
+  const saveCategory = async (category) => {
+    const name = category.nombre.trim()
+    if (!name) { setMessage('El nombre de la categoría no puede quedar vacío.'); return }
+    const { error } = await client.from('categorias').update({ nombre: name }).eq('id', category.id)
+    setMessage(error ? 'No se pudo guardar la categoría. El nombre debe ser único.' : 'Categoría guardada.')
+    if (!error) await refresh()
+  }
+  const deleteCategory = async (category) => {
+    if (!window.confirm(`¿Eliminar la categoría “${category.nombre}”? Los productos asignados quedarán sin categoría.`)) return
+    const { error } = await client.from('categorias').delete().eq('id', category.id)
+    if (error) { setMessage('No se pudo eliminar la categoría.'); return }
+    setProducts((current) => current.map((product) => product.categoria_id === category.id ? { ...product, categoria_id: null } : product))
+    setCategories((current) => current.filter((item) => item.id !== category.id))
+    setMessage('Categoría eliminada. Los productos quedaron sin categoría.')
+  }
+  const changeCategoryName = (id, value) => setCategories((current) => current.map((category) => category.id === id ? { ...category, nombre: value } : category))
   const saveProduct = async (product) => {
-    const { error } = await client.from('productos').update({ nombre: product.nombre.trim(), descripcion: product.descripcion || '', precio: Number(product.precio), disponible: product.disponible }).eq('id', product.id)
+    const { error } = await client.from('productos').update({ nombre: product.nombre.trim(), descripcion: product.descripcion || '', precio: Number(product.precio), disponible: product.disponible, categoria_id: product.categoria_id || null }).eq('id', product.id)
     setMessage(error ? 'No se pudo guardar el producto.' : 'Cambios guardados.')
     if (!error) refresh()
   }
@@ -159,7 +194,7 @@ export function ProductsPanel({ client = supabase }) {
     if (!files.length) { setMessage('Selecciona al menos una foto.'); return }
     if (files.some((file) => !isValidProductImage(file))) { setMessage('Elige imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.'); return }
     setSaving(true)
-    const newProduct = { id: crypto.randomUUID(), nombre: name, descripcion: String(form.get('description') || '').trim(), precio: price, disponible: form.get('available') === 'on', orden: getNextProductOrder(products) }
+    const newProduct = { id: crypto.randomUUID(), nombre: name, descripcion: String(form.get('description') || '').trim(), precio: price, disponible: form.get('available') === 'on', orden: getNextProductOrder(products), categoria_id: String(form.get('categoryId') || '') || null }
     const { error: createError } = await client.from('productos').insert(newProduct)
     if (createError) { setSaving(false); setMessage('No se pudo crear el producto.'); return }
     let uploadError = false
@@ -187,10 +222,11 @@ export function ProductsPanel({ client = supabase }) {
     await refresh()
   }
   return <section className="products-admin">
+    <section className="admin-category-manager" aria-labelledby="category-manager-title"><div><h2 id="category-manager-title">Categorías</h2><p>Organiza los productos y administra los filtros de la tienda.</p></div><form className="admin-category-create" onSubmit={createCategory}><label htmlFor="new-category-name">Nueva categoría</label><input id="new-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} maxLength="60" placeholder="Nombre de categoría" required /><button className="button button-dark button-small" type="submit">Crear categoría</button></form>{categories.length ? <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><label><span>{category.nombre}</span><input aria-label={`Nombre categoría ${category.nombre}`} value={category.nombre} onChange={(event) => changeCategoryName(category.id, event.target.value)} /></label><small>{products.filter((product) => product.categoria_id === category.id).length} productos</small><button className="button button-outline button-small" onClick={() => saveCategory(category)}>Guardar</button><button className="button button-danger button-small" onClick={() => deleteCategory(category)}>Eliminar</button></div>)}</div> : <p>Aún no hay categorías. Crea una para asignarla a tus productos.</p>}</section>
     <div className="products-admin-toolbar"><div><h2>Catálogo de productos</h2><p>Arrastra las tarjetas para cambiar el orden. Guarda los cambios para publicarlos en la tienda.</p></div><div className="products-admin-actions">{orderDirty && <button className="button button-dark" onClick={saveProductOrder} disabled={saving}>Guardar orden</button>}<button className="button button-primary" onClick={() => setShowNewProduct((visible) => !visible)} disabled={saving}>{showNewProduct ? 'Cancelar' : '+ Nuevo producto'}</button></div></div>
     {message && <p className="notice" role="status">{message}</p>}
-    {showNewProduct && <form className="new-product-form" onSubmit={createProduct}><h3>Agregar producto</h3><label>Nombre *<input name="name" required maxLength="100" /></label><label>Precio (COP) *<input name="price" type="number" required min="0" step="1" /></label><label>Descripción<textarea name="description" maxLength="1000" /></label><label className="new-product-available"><input name="available" type="checkbox" defaultChecked /> Disponible en la tienda</label><label className="new-product-photos">Fotos *<input name="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required /></label><small>Selecciona una o más imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.</small><button className="button button-dark" type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Crear producto'}</button></form>}
-    {loading ? <p>Cargando productos…</p> : !products.length ? <p>Aún no hay productos. Crea el primero con el botón “Nuevo producto”.</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderProducts}><SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-products-grid">{products.map((product) => <SortableProductCard key={product.id} product={product} onChange={changeProduct} onSave={saveProduct} onUpload={uploadFiles} onDelete={deleteProduct} onDeletePhoto={deletePhoto} />)}</div></SortableContext></DndContext>}
+    {showNewProduct && <form className="new-product-form" onSubmit={createProduct}><h3>Agregar producto</h3><label>Nombre *<input name="name" required maxLength="100" /></label><label>Precio (COP) *<input name="price" type="number" required min="0" step="1" /></label><label>Descripción<textarea name="description" maxLength="1000" /></label><label>Categoría<select name="categoryId" defaultValue=""><option value="">Sin categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.nombre}</option>)}</select></label><label className="new-product-available"><input name="available" type="checkbox" defaultChecked /> Disponible en la tienda</label><label className="new-product-photos">Fotos *<input name="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required /></label><small>Selecciona una o más imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.</small><button className="button button-dark" type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Crear producto'}</button></form>}
+    {loading ? <p>Cargando productos…</p> : !products.length ? <p>Aún no hay productos. Crea el primero con el botón “Nuevo producto”.</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderProducts}><SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-products-grid">{products.map((product) => <SortableProductCard key={product.id} product={product} categories={categories} onChange={changeProduct} onSave={saveProduct} onUpload={uploadFiles} onDelete={deleteProduct} onDeletePhoto={deletePhoto} />)}</div></SortableContext></DndContext>}
     {saving && <p role="status" className="admin-saving">Guardando cambios…</p>}
   </section>
 }

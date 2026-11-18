@@ -7,12 +7,19 @@ export const hasSupabase = Boolean(supabase)
 
 export async function loadProducts() {
   if (!supabase) return null
-  const { data, error } = await supabase.from('productos').select('id,nombre,descripcion,precio,disponible,producto_fotos(url,orden)').eq('disponible', true).order('orden').order('id')
+  const { data, error } = await supabase.from('productos').select('id,nombre,descripcion,precio,disponible,categoria_id,producto_fotos(url,orden)').eq('disponible', true).order('orden').order('id')
   if (error) throw error
   return data.map((row) => ({
-    id: String(row.id), name: row.nombre, description: row.descripcion || '', price: Number(row.precio),
+    id: String(row.id), name: row.nombre, description: row.descripcion || '', price: Number(row.precio), categoryId: row.categoria_id || null,
     images: [...(row.producto_fotos || [])].sort((a, b) => a.orden - b.orden).map((photo) => photo.url),
   }))
+}
+
+export async function loadCategories() {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('categorias').select('id,nombre').order('nombre')
+  if (error) throw error
+  return data || []
 }
 
 export async function saveOrder(order) {

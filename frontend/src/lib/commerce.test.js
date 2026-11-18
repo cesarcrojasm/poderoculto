@@ -37,8 +37,8 @@ describe('commerce helpers', () => {
     expect(readCart({ getItem: () => 'null' })).toEqual([])
   })
 
-  it('provides the seven priced products and image fallbacks', () => {
-    expect(PRODUCTS).toHaveLength(7)
+  it('provides all eleven priced products and image fallbacks', () => {
+    expect(PRODUCTS).toHaveLength(11)
     expect(PRODUCTS.every((product) => product.price > 0 && product.images.length > 0)).toBe(true)
   })
 })

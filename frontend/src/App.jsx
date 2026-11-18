@@ -1,13 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { PRODUCTS } from './data/catalog'
+import { CATEGORIES, PRODUCTS } from './data/catalog'
 import { cartTotal, formatPrice, makeOrderMessage, readCart, whatsappUrl } from './lib/commerce'
-import { hasSupabase, loadProducts, saveOrder } from './lib/supabase'
+import { hasSupabase, loadCategories, loadProducts, saveOrder } from './lib/supabase'
 import Brand from './components/Brand'
 import ProductCard from './components/ProductCard'
 import BraceletDesigner from './components/BraceletDesigner'
 const Admin = lazy(() => import('./components/Admin'))
 
 const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || '573214411674'
+const COLOMBIA_PRODUCTS = PRODUCTS.filter((product) => product.id.startsWith('colombia-'))
+const categoryFromUrl = () => new URLSearchParams(window.location.search).get('categoria') || ''
 
 function CartDrawer({ items, setItems, onClose }) {
   const [name, setName] = useState('')
@@ -55,13 +57,43 @@ function Storefront() {
   const [cartOpen, setCartOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [loadMessage, setLoadMessage] = useState('')
+  const [categories, setCategories] = useState(CATEGORIES)
+  const [activeCategoryId, setActiveCategoryId] = useState(categoryFromUrl)
   useEffect(() => { localStorage.setItem('poder-oculto-cart', JSON.stringify(cart)) }, [cart])
   useEffect(() => {
     let mounted = true
-    loadProducts().then((result) => { if (mounted && result) setProducts(result) }).catch(() => { if (mounted) setLoadMessage('Mostrando el catálogo de muestra. Revisa la conexión de Supabase.') })
+    loadProducts().then((result) => {
+      if (mounted && result) {
+        const productsById = new Map(result.map((product) => [product.id, product]))
+        COLOMBIA_PRODUCTS.forEach((product) => { if (!productsById.has(product.id)) productsById.set(product.id, product) })
+        setProducts([...productsById.values()])
+      }
+    }).catch(() => { if (mounted) setLoadMessage('Mostrando el catálogo de muestra. Revisa la conexión de Supabase.') })
+    loadCategories().then((result) => { if (mounted && result) setCategories(result) }).catch(() => { if (mounted) setLoadMessage('Mostrando categorías de muestra. Revisa la conexión de Supabase.') })
     return () => { mounted = false }
   }, [])
-  const visibleProducts = useMemo(() => products.filter((product) => `${product.name} ${product.description}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es'))), [products, search])
+  useEffect(() => {
+    const syncCategoryFromUrl = () => setActiveCategoryId(categoryFromUrl())
+    window.addEventListener('popstate', syncCategoryFromUrl)
+    return () => window.removeEventListener('popstate', syncCategoryFromUrl)
+  }, [])
+  useEffect(() => {
+    if (activeCategoryId && categories.length && !categories.some((category) => category.id === activeCategoryId)) {
+      setActiveCategoryId('')
+      const url = new URL(window.location.href)
+      url.searchParams.delete('categoria')
+      window.history.replaceState(null, '', url)
+    }
+  }, [activeCategoryId, categories])
+  const availableCategoryIds = useMemo(() => new Set(products.map((product) => product.categoryId).filter(Boolean)), [products])
+  const visibleProducts = useMemo(() => products.filter((product) => (!activeCategoryId || product.categoryId === activeCategoryId) && `${product.name} ${product.description}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es'))), [products, search, activeCategoryId])
+  const selectCategory = (categoryId) => {
+    setActiveCategoryId(categoryId)
+    const url = new URL(window.location.href)
+    if (categoryId) url.searchParams.set('categoria', categoryId)
+    else url.searchParams.delete('categoria')
+    window.history.pushState(null, '', url)
+  }
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0)
   const addProduct = (product) => {
     setCart((current) => {
@@ -80,7 +112,17 @@ function Storefront() {
     <main>
       <section className="hero"><div className="hero-copy"><span className="eyebrow">PIEZAS HECHAS A MANO · COLOMBIA</span><h1>Un símbolo.<br /><em>Tu propia energía.</em></h1><p>Macramé, piedras y pequeños detalles para acompañarte todos los días.</p><div className="hero-actions"><a className="button button-primary" href="#catalogo">Encuentra tu manilla <span aria-hidden="true">↓</span></a><a className="text-link" href="#crear">O crea la tuya</a></div><div className="hero-note"><span>✦</span> Tejidas a mano, una a una</div></div><div className="hero-art"><img src="/products/1.1.jpeg" alt="Manilla roja tejida a mano con piedras naturales" /><div className="hero-stamp"><span>HECHO</span><strong>con<br />intención</strong><span>✧ A MANO ✧</span></div></div><div className="hero-decor" aria-hidden="true">✧</div></section>
       <section className="intro-strip" id="historia"><div><span className="eyebrow">PODER OCULTO</span><p>Conecta con tu energía natural. El arte del macramé se encuentra con la belleza de las piedras para crear un amuleto único, hecho para ti.</p></div><a href="https://instagram.com/poder_oculto7" target="_blank" rel="noreferrer">Descubre nuestra historia en Instagram ↗</a></section>
+      <section className="colombia-section" aria-labelledby="colombia-title">
+        <div className="colombia-copy"><span className="eyebrow">HECHO EN COLOMBIA</span><h2 id="colombia-title">Tejido con los colores de nuestra tierra</h2><p>Cada nudo cuenta una historia. Nuestras manillas llevan el amarillo, el azul y el rojo de Colombia: un homenaje a la tierra que nos inspira, tejido hilo a hilo por manos colombianas.</p><a className="button button-primary" href="/?categoria=colombiana#catalogo">Ver manillas colombianas <span aria-hidden="true">↓</span></a><div className="colombia-note"><span aria-hidden="true">✦</span> Tradición y detalle en cada tejido</div></div>
+        <div className="colombia-gallery" aria-label="Manillas tejidas inspiradas en Colombia">
+          <img className="colombia-photo colombia-photo-featured" src="/colombia/colombia-heart.jpeg" alt="Manilla negra con cuentas de colores y un corazón con la bandera de Colombia" />
+          <img className="colombia-photo" src="/colombia/colombia-red.jpeg" alt="Manilla roja tejida con cuentas amarillas, azules y rojas" />
+          <img className="colombia-photo" src="/colombia/colombia-black.jpeg" alt="Manilla negra tejida con cuentas en los colores de Colombia" />
+          <img className="colombia-photo" src="/colombia/colombia-upright.jpeg" alt="Manilla negra de macramé con detalles de cuentas tricolores" />
+        </div>
+      </section>
       <section className="section catalog-section" id="catalogo"><div className="section-heading section-heading-row"><div><span className="eyebrow">ELIGE LA QUE TE LLAMA</span><h2>Manillas con historia</h2><p>Cada pieza está tejida a mano y lista para acompañarte.</p></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="Buscar manillas" placeholder="Buscar una manilla" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>
+        <div className="category-filters" role="group" aria-label="Filtrar por categoría"><button className={`category-filter${activeCategoryId ? '' : ' active'}`} aria-pressed={!activeCategoryId} onClick={() => selectCategory('')}>Todas</button>{categories.filter((category) => availableCategoryIds.has(category.id)).map((category) => <button key={category.id} className={`category-filter${activeCategoryId === category.id ? ' active' : ''}`} aria-pressed={activeCategoryId === category.id} onClick={() => selectCategory(category.id)}>{category.nombre}</button>)}</div>
         {loadMessage && <p className="notice" role="status">{loadMessage}</p>}
         <div className="product-grid">{visibleProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={addProduct} />)}</div>
         {!visibleProducts.length && <p className="empty-search">No encontramos piezas con ese nombre. Prueba otra búsqueda.</p>}

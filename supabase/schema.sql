@@ -1,5 +1,11 @@
 create extension if not exists pgcrypto;
 
+create table if not exists public.categorias (
+  id text primary key,
+  nombre text not null unique,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.productos (
   id text primary key,
   nombre text not null,
@@ -7,7 +13,8 @@ create table if not exists public.productos (
   precio integer not null check (precio >= 0),
   disponible boolean not null default true,
   orden integer not null default 0,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  categoria_id text references public.categorias(id) on delete set null
 );
 
 create table if not exists public.producto_fotos (
@@ -76,6 +83,10 @@ create table if not exists public.pedidos (
 
 create index if not exists pedidos_created_at_idx on public.pedidos (created_at desc);
 
+insert into public.categorias (id, nombre) values
+('colombiana', 'Colombiana'), ('clasica', 'Clásica')
+on conflict (id) do nothing;
+
 insert into public.productos (id, nombre, descripcion, precio, orden) values
 ('1', 'Raíz carmesí', 'Macramé rojo y piedras en tonos cálidos: un pequeño recordatorio de fuerza, arraigo y nuevos comienzos.', 20000, 1),
 ('2', 'Lazo de calma', 'Hilo rojo tejido a mano con cuentas rosadas suaves. Un detalle delicado para llevar cerca lo que te da tranquilidad.', 10000, 2),
@@ -86,13 +97,26 @@ insert into public.productos (id, nombre, descripcion, precio, orden) values
 ('7', 'Turquesa protectora', 'Macramé azul noche y una cruz turquesa rodeada de cuentas azules. Color y carácter en una pieza hecha a mano.', 30000, 7)
 on conflict (id) do update set nombre = excluded.nombre, descripcion = excluded.descripcion, precio = excluded.precio, orden = excluded.orden;
 
+update public.productos set categoria_id = 'clasica' where id in ('1','2','3','4','5','6','7');
+
+insert into public.productos (id, nombre, descripcion, precio, disponible, orden, categoria_id) values
+('colombia-heart', 'Corazón tricolor', 'Macramé negro con cuentas de colores y un corazón con la bandera colombiana: un símbolo de cariño por nuestra tierra.', 20000, true, 8, 'colombiana'),
+('colombia-red', 'Raíces de Colombia', 'Hilo rojo tejido a mano con cuentas amarillas, azules y rojas, inspirado en los colores que nos unen.', 20000, true, 9, 'colombiana'),
+('colombia-black', 'Orgullo tricolor', 'Macramé negro con cuentas en amarillo, azul y rojo: un diseño artesanal para llevar a Colombia contigo.', 20000, true, 10, 'colombiana'),
+('colombia-upright', 'Camino colombiano', 'Tejido negro con una cuenta central tricolor y pequeños detalles de color, hecho a mano con inspiración colombiana.', 20000, true, 11, 'colombiana')
+on conflict (id) do nothing;
+
 insert into public.producto_fotos (producto_id, url, orden) values
 ('1', '/products/1.1.jpeg', 1), ('1', '/products/1.2.jpeg', 2),
 ('2', '/products/2.1.jpeg', 1), ('2', '/products/2.2.jpeg', 2),
 ('3', '/products/3.1.jpeg', 1), ('3', '/products/3.2.jpeg', 2),
 ('4', '/products/4.1.jpeg', 1), ('4', '/products/4.2.jpeg', 2),
 ('5', '/products/5.1.jpeg', 1), ('5', '/products/5.2.jpeg', 2),
-('6', '/products/6.jpeg', 1), ('7', '/products/7.jpeg', 1)
+('6', '/products/6.jpeg', 1), ('7', '/products/7.jpeg', 1),
+('colombia-heart', '/colombia/colombia-heart.jpeg', 1),
+('colombia-red', '/colombia/colombia-red.jpeg', 1),
+('colombia-black', '/colombia/colombia-black.jpeg', 1),
+('colombia-upright', '/colombia/colombia-upright.jpeg', 1)
 on conflict (producto_id, url) do nothing;
 
 insert into public.tipos_tejido (id, nombre) values ('clasico', 'Macramé clásico'), ('trenzado', 'Trenzado') on conflict (id) do nothing;
@@ -108,6 +132,7 @@ insert into public.dijes (id, nombre, icono) values ('corazon', 'Corazón', '♡
 insert into public.bolas_metal (id, nombre, precio, hex_color) values ('plata', 'Plata', 4000, '#bbc0c2'), ('oro', 'Oro', 5000, '#caa34a') on conflict (id) do nothing;
 insert into public.config_manilla (id, precio_base, min_piedras, max_piedras) values ('00000000-0000-0000-0000-000000000001', 18000, 3, 10) on conflict (id) do nothing;
 
+alter table public.categorias enable row level security;
 alter table public.productos enable row level security;
 alter table public.producto_fotos enable row level security;
 alter table public.tipos_tejido enable row level security;
@@ -117,6 +142,11 @@ alter table public.dijes enable row level security;
 alter table public.bolas_metal enable row level security;
 alter table public.config_manilla enable row level security;
 alter table public.pedidos enable row level security;
+
+drop policy if exists "Public reads categories" on public.categorias;
+create policy "Public reads categories" on public.categorias for select to anon, authenticated using (true);
+drop policy if exists "Authenticated manages categories" on public.categorias;
+create policy "Authenticated manages categories" on public.categorias for all to authenticated using (true) with check (true);
 
 drop policy if exists "Public reads available products" on public.productos;
 create policy "Public reads available products" on public.productos for select to anon, authenticated using (disponible or auth.role() = 'authenticated');
