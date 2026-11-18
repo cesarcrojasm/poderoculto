@@ -23,9 +23,11 @@ describe('commerce helpers', () => {
       { type: 'product', name: 'Raíz carmesí', price: 20000, quantity: 2 },
       { type: 'custom', name: 'Manilla personalizada', price: 28500, quantity: 1, configuration: { weave: 'Trenzado', thread: 'Rojo', stones: [{ name: 'Howlita' }, { name: 'Amatista' }], charmName: 'Corazón', metalName: 'Plata' } },
     ]
-    const message = makeOrderMessage('Ana', '3001234567', items, 68500)
-    expect(message).toContain('Ana (celular: 3001234567)')
+    const message = makeOrderMessage(items, 68500)
+    expect(message).not.toContain('celular')
     expect(message).toContain('Raíz carmesí × 2')
+    expect(message).toContain('Manilla personalizada × 1')
+    expect(message).toContain('28.500')
     expect(message).toContain('Howlita, Amatista')
     expect(message).toContain('68.500')
   })

@@ -22,13 +22,6 @@ export async function loadCategories() {
   return data || []
 }
 
-export async function saveOrder(order) {
-  if (!supabase) return { saved: false, reason: 'demo' }
-  const { error } = await supabase.from('pedidos').insert({ nombre: order.name, celular: order.phone, items: order.items, total: order.total })
-  if (error) throw error
-  return { saved: true }
-}
-
 export async function loadDesignerOptions() {
   if (!supabase) return null
   const queries = [

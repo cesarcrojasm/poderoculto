@@ -7,7 +7,6 @@ vi.mock('./lib/supabase', () => ({
   loadProducts: vi.fn().mockResolvedValue(null),
   loadCategories: vi.fn().mockResolvedValue(null),
   loadDesignerOptions: vi.fn().mockResolvedValue(null),
-  saveOrder: vi.fn().mockResolvedValue({ saved: false, reason: 'demo' }),
 }))
 
 import App from './App'
@@ -32,6 +31,12 @@ describe('storefront flow', () => {
     expect(screen.getByRole('link', { name: /contactar a poder oculto por whatsapp/i })).toHaveAttribute('href', expect.stringContaining('wa.me/573214411674'))
   })
 
+  it('uses a recognizable shopping cart icon in the header', () => {
+    render(<App />)
+    const cartButton = screen.getByRole('button', { name: /abrir carrito/i })
+    expect(cartButton.querySelector('svg')).toHaveAttribute('viewBox', '0 0 24 24')
+  })
+
   it('promotes Colombian bracelets with the four collection photos', () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: /tejido con los colores de nuestra tierra/i })).toBeInTheDocument()
@@ -53,16 +58,20 @@ describe('storefront flow', () => {
     })
   })
 
-  it('adds a premade bracelet to the cart and sends the two-field order to WhatsApp', async () => {
+  it('continues to WhatsApp with the cart details without asking for customer information', async () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getAllByRole('button', { name: /agregar/i })[0])
     expect(screen.getByRole('dialog', { name: 'Carrito' })).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Nombre'), 'Ana Pérez')
-    await user.type(screen.getByLabelText('Celular'), '3001234567')
+    expect(screen.queryByLabelText('Nombre')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Celular')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /continuar por whatsapp/i }))
     await waitFor(() => expect(window.open).toHaveBeenCalledWith(expect.stringContaining('wa.me/573214411674'), '_blank', 'noopener,noreferrer'))
-    expect(await screen.findByText(/conecta supabase para guardar pedidos/i)).toBeInTheDocument()
+    const message = new URL(window.open.mock.calls[0][0]).searchParams.get('text')
+    expect(message).toContain('Raíz carmesí × 1')
+    expect(message).toContain('20.000')
+    expect(message).not.toContain('celular')
+    expect(await screen.findByText(/whatsapp se abrió con los detalles/i)).toBeInTheDocument()
     expect(localStorage.getItem('poder-oculto-cart')).toBe('[]')
   })
 })

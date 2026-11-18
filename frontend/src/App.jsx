@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CATEGORIES, PRODUCTS } from './data/catalog'
 import { cartTotal, formatPrice, makeOrderMessage, readCart, whatsappUrl } from './lib/commerce'
-import { hasSupabase, loadCategories, loadProducts, saveOrder } from './lib/supabase'
+import { hasSupabase, loadCategories, loadProducts } from './lib/supabase'
 import Brand from './components/Brand'
 import ProductCard from './components/ProductCard'
 import BraceletDesigner from './components/BraceletDesigner'
@@ -12,23 +12,14 @@ const COLOMBIA_PRODUCTS = PRODUCTS.filter((product) => product.id.startsWith('co
 const categoryFromUrl = () => new URLSearchParams(window.location.search).get('categoria') || ''
 
 function CartDrawer({ items, setItems, onClose }) {
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
   const [status, setStatus] = useState('')
   const total = cartTotal(items)
   const updateQuantity = (cartId, quantity) => setItems((current) => current.map((item) => item.cartId === cartId ? { ...item, quantity: Math.max(1, quantity) } : item))
   const removeItem = (cartId) => setItems((current) => current.filter((item) => item.cartId !== cartId))
-  const submitOrder = async (event) => {
-    event.preventDefault()
-    const order = { name: name.trim(), phone: phone.trim(), items, total }
-    const message = makeOrderMessage(order.name, order.phone, items, total)
+  const submitOrder = () => {
+    const message = makeOrderMessage(items, total)
     window.open(whatsappUrl(WHATSAPP, message), '_blank', 'noopener,noreferrer')
-    try {
-      const result = await saveOrder(order)
-      setStatus(result.saved ? '¡Listo! Tu pedido quedó registrado y WhatsApp ya está abierto.' : 'WhatsApp ya está abierto. Conecta Supabase para guardar pedidos en línea.')
-    } catch {
-      setStatus('WhatsApp ya está abierto, pero no pudimos guardar el pedido. Por favor envíalo desde WhatsApp.')
-    }
+    setStatus('WhatsApp se abrió con los detalles de tu pedido. Envíalo allí para confirmar.')
     setItems([])
   }
   return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title">
@@ -41,12 +32,9 @@ function CartDrawer({ items, setItems, onClose }) {
         </div><button className="remove-item" aria-label={`Quitar ${item.name}`} onClick={() => removeItem(item.cartId)}>Quitar</button>
       </li>)}</ul>
       <div className="cart-total"><span>Total estimado</span><strong>{formatPrice(total)}</strong></div>
-      <form className="checkout-form" onSubmit={submitOrder}><p>Déjanos tus datos y confirma tu pedido por WhatsApp. No se realiza ningún pago en la web.</p>
-        <label>Nombre<input autoComplete="name" required maxLength="80" value={name} onChange={(event) => setName(event.target.value)} placeholder="Tu nombre" /></label>
-        <label>Celular<input autoComplete="tel" inputMode="tel" required maxLength="20" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="300 000 0000" /></label>
-        <button className="button button-primary full-width" type="submit">Continuar por WhatsApp <span aria-hidden="true">↗</span></button>
-        {status && <p className="form-status" role="status">{status}</p>}
-      </form>
+      <div className="checkout-form"><p>Continúa a WhatsApp para revisar y enviar los detalles de tus piezas. El pedido se confirma al enviar el mensaje.</p>
+        <button className="button button-primary full-width" type="button" onClick={submitOrder}>Continuar por WhatsApp <span aria-hidden="true">↗</span></button>
+      </div>
     </>}
   </aside></div>
 }
@@ -108,7 +96,7 @@ function Storefront() {
     setCartOpen(true)
   }
   return <>
-    <header className="site-header"><div className="header-inner"><Brand /><nav className="main-nav" aria-label="Navegación principal"><a href="#catalogo">Manillas</a><a href="#crear">Diseña la tuya</a><a href="#historia">Nuestra esencia</a></nav><div className="header-actions"><a className="instagram-link" href="https://instagram.com/poder_oculto7" target="_blank" rel="noreferrer">Instagram <span aria-hidden="true">↗</span></a><button className="cart-trigger" aria-label={`Abrir carrito, ${cartCount} artículos`} onClick={() => setCartOpen(true)}><span aria-hidden="true">♧</span><span className="cart-count">{cartCount}</span></button></div></div></header>
+    <header className="site-header"><div className="header-inner"><Brand /><nav className="main-nav" aria-label="Navegación principal"><a href="#catalogo">Manillas</a><a href="#crear">Diseña la tuya</a><a href="#historia">Nuestra esencia</a></nav><div className="header-actions"><a className="instagram-link" href="https://instagram.com/poder_oculto7" target="_blank" rel="noreferrer">Instagram <span aria-hidden="true">↗</span></a><button className="cart-trigger" aria-label={`Abrir carrito, ${cartCount} artículos`} onClick={() => setCartOpen(true)}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span className="cart-count">{cartCount}</span></button></div></div></header>
     <main>
       <section className="hero"><div className="hero-copy"><span className="eyebrow">PIEZAS HECHAS A MANO · COLOMBIA</span><h1>Un símbolo.<br /><em>Tu propia energía.</em></h1><p>Macramé, piedras y pequeños detalles para acompañarte todos los días.</p><div className="hero-actions"><a className="button button-primary" href="#catalogo">Encuentra tu manilla <span aria-hidden="true">↓</span></a><a className="text-link" href="#crear">O crea la tuya</a></div><div className="hero-note"><span>✦</span> Tejidas a mano, una a una</div></div><div className="hero-art"><img src="/products/1.1.jpeg" alt="Manilla roja tejida a mano con piedras naturales" /><div className="hero-stamp"><span>HECHO</span><strong>con<br />intención</strong><span>✧ A MANO ✧</span></div></div><div className="hero-decor" aria-hidden="true">✧</div></section>
       <section className="intro-strip" id="historia"><div><span className="eyebrow">PODER OCULTO</span><p>Conecta con tu energía natural. El arte del macramé se encuentra con la belleza de las piedras para crear un amuleto único, hecho para ti.</p></div><a href="https://instagram.com/poder_oculto7" target="_blank" rel="noreferrer">Descubre nuestra historia en Instagram ↗</a></section>
