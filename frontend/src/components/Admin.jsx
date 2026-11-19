@@ -1,19 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import Brand from './Brand'
 import './admin-products.css'
+import './admin-options.css'
 import { formatPrice } from '../lib/commerce'
 import { getNextProductOrder, getProductOrderUpdates, getStorageObjectPath, hasUnsavedProductOrder, isValidProductImage, moveItem } from '../lib/adminProducts'
 import { hasSupabase, supabase } from '../lib/supabase'
 
 const TABLES = [
-  { key: 'tipos_piedra', label: 'Piedras', priceColumn: 'precio_unit', colorColumn: 'hex_color', paletteColumn: 'colores' },
-  { key: 'bolas_metal', label: 'Bolas metálicas', priceColumn: 'precio', colorColumn: 'hex_color' },
-  { key: 'dijes', label: 'Dijes', priceColumn: null },
-  { key: 'colores_hilo', label: 'Colores de hilo', priceColumn: null, colorColumn: 'hex_color' },
-  { key: 'tipos_tejido', label: 'Tejidos', priceColumn: null },
+  { key: 'tipos_piedra', label: 'Piedras', addLabel: 'piedra', priceColumn: 'precio_unit', image: true, folder: 'piedras' },
+  { key: 'bolas_metal', label: 'Bolas metálicas', addLabel: 'bola metálica', priceColumn: 'precio', image: true, folder: 'bolas' },
+  { key: 'dijes', label: 'Dijes', addLabel: 'dije', image: true, folder: 'dijes' },
+  { key: 'colores_hilo', label: 'Colores de hilo', addLabel: 'color de hilo', colorColumn: 'hex_color' },
+  { key: 'tipos_tejido', label: 'Tejidos', addLabel: 'tejido' },
 ]
 
 function LoginForm() {
@@ -53,7 +54,6 @@ function SortableProductCard({ product, categories, onChange, onSave, onUpload, 
 export function ProductsPanel({ client = supabase }) {
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
-  const [categoryName, setCategoryName] = useState('')
   const [savedOrder, setSavedOrder] = useState([])
   const orderDirty = hasUnsavedProductOrder(products, savedOrder)
   const [message, setMessage] = useState('')
@@ -84,33 +84,6 @@ export function ProductsPanel({ client = supabase }) {
   }
   useEffect(() => { refresh() }, [])
   const changeProduct = (id, key, value) => setProducts((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item))
-  const createCategory = async (event) => {
-    event.preventDefault()
-    const name = categoryName.trim()
-    const id = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    if (!name || !id) { setMessage('Escribe un nombre válido para la categoría.'); return }
-    const { error } = await client.from('categorias').insert({ id, nombre: name })
-    if (error) { setMessage('No se pudo crear la categoría. Verifica que el nombre o su identificador no estén repetidos.'); return }
-    setCategoryName('')
-    setMessage('Categoría creada.')
-    await refresh()
-  }
-  const saveCategory = async (category) => {
-    const name = category.nombre.trim()
-    if (!name) { setMessage('El nombre de la categoría no puede quedar vacío.'); return }
-    const { error } = await client.from('categorias').update({ nombre: name }).eq('id', category.id)
-    setMessage(error ? 'No se pudo guardar la categoría. El nombre debe ser único.' : 'Categoría guardada.')
-    if (!error) await refresh()
-  }
-  const deleteCategory = async (category) => {
-    if (!window.confirm(`¿Eliminar la categoría “${category.nombre}”? Los productos asignados quedarán sin categoría.`)) return
-    const { error } = await client.from('categorias').delete().eq('id', category.id)
-    if (error) { setMessage('No se pudo eliminar la categoría.'); return }
-    setProducts((current) => current.map((product) => product.categoria_id === category.id ? { ...product, categoria_id: null } : product))
-    setCategories((current) => current.filter((item) => item.id !== category.id))
-    setMessage('Categoría eliminada. Los productos quedaron sin categoría.')
-  }
-  const changeCategoryName = (id, value) => setCategories((current) => current.map((category) => category.id === id ? { ...category, nombre: value } : category))
   const saveProduct = async (product) => {
     const { error } = await client.from('productos').update({ nombre: product.nombre.trim(), descripcion: product.descripcion || '', precio: Number(product.precio), disponible: product.disponible, categoria_id: product.categoria_id || null }).eq('id', product.id)
     setMessage(error ? 'No se pudo guardar el producto.' : 'Cambios guardados.')
@@ -222,7 +195,6 @@ export function ProductsPanel({ client = supabase }) {
     await refresh()
   }
   return <section className="products-admin">
-    <section className="admin-category-manager" aria-labelledby="category-manager-title"><div><h2 id="category-manager-title">Categorías</h2><p>Organiza los productos y administra los filtros de la tienda.</p></div><form className="admin-category-create" onSubmit={createCategory}><label htmlFor="new-category-name">Nueva categoría</label><input id="new-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} maxLength="60" placeholder="Nombre de categoría" required /><button className="button button-dark button-small" type="submit">Crear categoría</button></form>{categories.length ? <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><label><span>{category.nombre}</span><input aria-label={`Nombre categoría ${category.nombre}`} value={category.nombre} onChange={(event) => changeCategoryName(category.id, event.target.value)} /></label><small>{products.filter((product) => product.categoria_id === category.id).length} productos</small><button className="button button-outline button-small" onClick={() => saveCategory(category)}>Guardar</button><button className="button button-danger button-small" onClick={() => deleteCategory(category)}>Eliminar</button></div>)}</div> : <p>Aún no hay categorías. Crea una para asignarla a tus productos.</p>}</section>
     <div className="products-admin-toolbar"><div><h2>Catálogo de productos</h2><p>Arrastra las tarjetas para cambiar el orden. Guarda los cambios para publicarlos en la tienda.</p></div><div className="products-admin-actions">{orderDirty && <button className="button button-dark" onClick={saveProductOrder} disabled={saving}>Guardar orden</button>}<button className="button button-primary" onClick={() => setShowNewProduct((visible) => !visible)} disabled={saving}>{showNewProduct ? 'Cancelar' : '+ Nuevo producto'}</button></div></div>
     {message && <p className="notice" role="status">{message}</p>}
     {showNewProduct && <form className="new-product-form" onSubmit={createProduct}><h3>Agregar producto</h3><label>Nombre *<input name="name" required maxLength="100" /></label><label>Precio (COP) *<input name="price" type="number" required min="0" step="1" /></label><label>Descripción<textarea name="description" maxLength="1000" /></label><label>Categoría<select name="categoryId" defaultValue=""><option value="">Sin categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.nombre}</option>)}</select></label><label className="new-product-available"><input name="available" type="checkbox" defaultChecked /> Disponible en la tienda</label><label className="new-product-photos">Fotos *<input name="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required /></label><small>Selecciona una o más imágenes JPG, PNG, WebP o GIF de hasta 5 MB cada una.</small><button className="button button-dark" type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Crear producto'}</button></form>}
@@ -231,36 +203,185 @@ export function ProductsPanel({ client = supabase }) {
   </section>
 }
 
-function OptionsPanel() {
+export function CategoriesPanel({ client = supabase }) {
+  const [categories, setCategories] = useState([])
+  const [products, setProducts] = useState([])
+  const [categoryName, setCategoryName] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const refresh = async () => {
+    const [{ data: categoryData, error: categoryError }, { data: productData, error: productError }] = await Promise.all([
+      client.from('categorias').select('id,nombre').order('nombre'),
+      client.from('productos').select('id,categoria_id'),
+    ])
+    setLoading(false)
+    if (categoryError || productError) { setMessage('No fue posible cargar las categorías. Revisa los permisos de Supabase.'); return }
+    setCategories(categoryData || [])
+    setProducts(productData || [])
+  }
+  useEffect(() => { refresh() }, [])
+  const createCategory = async (event) => {
+    event.preventDefault()
+    const name = categoryName.trim()
+    const id = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (!name || !id) { setMessage('Escribe un nombre válido para la categoría.'); return }
+    const { error } = await client.from('categorias').insert({ id, nombre: name })
+    if (error) { setMessage('No se pudo crear la categoría. Verifica que el nombre o su identificador no estén repetidos.'); return }
+    setCategoryName('')
+    setMessage('Categoría creada.')
+    await refresh()
+  }
+  const saveCategory = async (category) => {
+    const name = category.nombre.trim()
+    if (!name) { setMessage('El nombre de la categoría no puede quedar vacío.'); return }
+    const { error } = await client.from('categorias').update({ nombre: name }).eq('id', category.id)
+    setMessage(error ? 'No se pudo guardar la categoría. El nombre debe ser único.' : 'Categoría guardada.')
+    if (!error) await refresh()
+  }
+  const deleteCategory = async (category) => {
+    if (!window.confirm(`¿Eliminar la categoría “${category.nombre}”? Los productos asignados quedarán sin categoría.`)) return
+    const { error } = await client.from('categorias').delete().eq('id', category.id)
+    if (error) { setMessage('No se pudo eliminar la categoría.'); return }
+    setCategories((current) => current.filter((item) => item.id !== category.id))
+    setProducts((current) => current.map((product) => product.categoria_id === category.id ? { ...product, categoria_id: null } : product))
+    setMessage('Categoría eliminada. Los productos quedaron sin categoría.')
+  }
+  const changeCategoryName = (id, value) => setCategories((current) => current.map((category) => category.id === id ? { ...category, nombre: value } : category))
+  return <section className="admin-category-manager" aria-labelledby="category-manager-title"><div><h2 id="category-manager-title">Categorías</h2><p>Organiza los productos y administra los filtros de la tienda.</p></div><form className="admin-category-create" onSubmit={createCategory}><label htmlFor="new-category-name">Nueva categoría</label><input id="new-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} maxLength="60" placeholder="Nombre de categoría" required /><button className="button button-dark button-small" type="submit">Crear categoría</button></form>{message && <p className="notice" role="status">{message}</p>}{loading ? <p>Cargando categorías…</p> : categories.length ? <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><label><span>{category.nombre}</span><input aria-label={`Nombre categoría ${category.nombre}`} value={category.nombre} onChange={(event) => changeCategoryName(category.id, event.target.value)} /></label><small>{products.filter((product) => product.categoria_id === category.id).length} productos</small><button className="button button-outline button-small" onClick={() => saveCategory(category)}>Guardar</button><button className="button button-danger button-small" onClick={() => deleteCategory(category)}>Eliminar</button></div>)}</div> : <p>Aún no hay categorías. Crea una para asignarla a tus productos.</p>}</section>
+}
+
+const OPTION_IMAGE_MAX_SIZE = 5 * 1024 * 1024
+const cleanOptionRow = (row, definition) => {
+  const values = { nombre: row.nombre.trim(), disponible: Boolean(row.disponible) }
+  if (definition.priceColumn) values[definition.priceColumn] = Number(row[definition.priceColumn] || 0)
+  if (definition.colorColumn) values[definition.colorColumn] = row[definition.colorColumn]
+  if (definition.image) values.imagen_url = row.imagen_url || null
+  return values
+}
+const optionRowChanged = (row, baseline, definition) => row._isNew || JSON.stringify(cleanOptionRow(row, definition)) !== JSON.stringify(cleanOptionRow(baseline, definition)) || Boolean(row._imageFile)
+const imagePath = (url) => getStorageObjectPath(url)
+
+function OptionSection({ definition, initialRows, client, onMessage }) {
+  const previews = useRef(new Set())
+  useEffect(() => () => previews.current.forEach((url) => URL.revokeObjectURL(url)), [])
+  const [rows, setRows] = useState(() => initialRows.map((row) => ({ ...row, _isNew: false, _deleted: false, _imageFile: null })))
+  const [baseline, setBaseline] = useState(initialRows)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  useEffect(() => {
+    setRows(initialRows.map((row) => ({ ...row, _isNew: false, _deleted: false, _imageFile: null })))
+    setBaseline(initialRows)
+  }, [initialRows])
+  const changed = rows.some((row) => !row._deleted && optionRowChanged(row, baseline.find((item) => item.id === row.id) || {}, definition)) || rows.some((row) => row._deleted)
+  const change = (id, values) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...values } : row))
+  const addRow = () => setRows((current) => [...current, { id: crypto.randomUUID(), nombre: '', disponible: true, _isNew: true, _deleted: false, _imageFile: null, ...(definition.priceColumn ? { [definition.priceColumn]: 0 } : {}), ...(definition.colorColumn ? { [definition.colorColumn]: '#ffffff' } : {}), ...(definition.image ? { imagen_url: null } : {}) }])
+  const removeRow = (row) => {
+    if (row._isNew) { setRows((current) => current.filter((item) => item.id !== row.id)); return }
+    change(row.id, { _deleted: true })
+  }
+  const uploadImage = async (row) => {
+    if (!row._imageFile) return { url: row.imagen_url, path: null }
+    const path = `personalizacion/${definition.folder}/${row.id}/${crypto.randomUUID()}-${row._imageFile.name.replace(/[^\w.-]/g, '-')}`
+    const { error } = await client.storage.from('productos').upload(path, row._imageFile, { upsert: false })
+    if (error) throw error
+    return { url: client.storage.from('productos').getPublicUrl(path).data.publicUrl, path }
+  }
+  const save = async () => {
+    const activeChanged = rows.filter((row) => !row._deleted && optionRowChanged(row, baseline.find((item) => item.id === row.id) || {}, definition))
+    for (const row of activeChanged) {
+      if (!row.nombre.trim()) { setMessage(`Completa el nombre en ${definition.label.toLocaleLowerCase('es')}.`); return }
+      if (definition.priceColumn && (!Number.isInteger(Number(row[definition.priceColumn])) || Number(row[definition.priceColumn]) < 0)) { setMessage(`Escribe un precio COP entero válido para “${row.nombre}”.`); return }
+      if (definition.image && !row._imageFile && !row.imagen_url) { setMessage(`Sube una imagen para “${row.nombre}” antes de guardar.`); return }
+      if (row._imageFile && !isValidProductImage(row._imageFile)) { setMessage('Usa imágenes JPG, PNG, WebP o GIF de hasta 5 MB.'); return }
+      if (definition.colorColumn && !/^#[\da-f]{6}$/i.test(row.hex_color || '')) { setMessage(`Usa un color hexadecimal válido para “${row.nombre}”.`); return }
+    }
+    setSaving(true)
+    setMessage('')
+    const successful = new Map()
+    let failures = 0
+    let cleanupWarning = false
+    for (const row of rows) {
+      try {
+        if (row._deleted) {
+          const { error } = await client.from(definition.key).delete().eq('id', row.id)
+          if (error) throw error
+          const oldPath = imagePath(row.imagen_url)
+          if (oldPath) {
+            const { error: removeError } = await client.storage.from('productos').remove([oldPath])
+            if (removeError) cleanupWarning = true
+          }
+          successful.set(row.id, null)
+          continue
+        }
+        if (!optionRowChanged(row, baseline.find((item) => item.id === row.id) || {}, definition)) continue
+        const oldUrl = row.imagen_url
+        const uploaded = await uploadImage(row)
+        const values = cleanOptionRow({ ...row, imagen_url: uploaded.url }, definition)
+        const result = row._isNew
+          ? await client.from(definition.key).insert({ id: row.id, ...values })
+          : await client.from(definition.key).update(values).eq('id', row.id)
+        if (result.error) {
+          if (uploaded.path) await client.storage.from('productos').remove([uploaded.path])
+          throw result.error
+        }
+        const oldPath = imagePath(oldUrl)
+        if (uploaded.path && oldPath && oldPath !== uploaded.path) {
+          const { error: removeError } = await client.storage.from('productos').remove([oldPath])
+          if (removeError) cleanupWarning = true
+        }
+        successful.set(row.id, { ...row, ...values, _isNew: false, _deleted: false, _imageFile: null, _imagePreview: null })
+      } catch {
+        failures += 1
+      }
+    }
+    if (successful.size) {
+      for (const id of successful.keys()) {
+        const preview = rows.find((row) => row.id === id)?._imagePreview
+        if (preview) { URL.revokeObjectURL(preview); previews.current.delete(preview) }
+      }
+      const committed = [...successful.values()].filter(Boolean)
+      setBaseline((current) => {
+        const existing = current.flatMap((row) => {
+          if (!successful.has(row.id)) return [row]
+          const saved = successful.get(row.id)
+          return saved ? [{ id: saved.id, ...cleanOptionRow(saved, definition) }] : []
+        })
+        return [...existing, ...committed.filter((row) => !current.some((saved) => saved.id === row.id)).map((row) => ({ id: row.id, ...cleanOptionRow(row, definition) }))]
+      })
+      setRows((current) => current.flatMap((row) => successful.has(row.id) ? (successful.get(row.id) ? [successful.get(row.id)] : []) : [row]))
+    }
+    setSaving(false)
+    setMessage(failures ? `${failures} cambio(s) no se pudieron guardar; puedes corregirlos e intentarlo de nuevo.${cleanupWarning ? ' No se pudo limpiar algún archivo anterior de Storage.' : ''}` : `Cambios guardados en ${definition.label.toLocaleLowerCase('es')}.${cleanupWarning ? ' No se pudo limpiar algún archivo anterior de Storage.' : ''}`)
+    if (!failures) onMessage(`Cambios guardados en ${definition.label.toLocaleLowerCase('es')}.`)
+  }
+  const colorInput = (row) => <div className="thread-color-input"><label className="thread-color-swatch" style={{ '--thread-color': row.hex_color }} title="Elegir color"><input aria-label={`Selector de color ${row.nombre || 'nuevo'}`} type="color" value={/^#[\da-f]{6}$/i.test(row.hex_color || '') ? row.hex_color : '#ffffff'} onChange={(event) => change(row.id, { hex_color: event.target.value })} /></label><input aria-label={`Hex ${row.nombre || 'nuevo'}`} value={row.hex_color || ''} maxLength="7" placeholder="#9b2928" onChange={(event) => change(row.id, { hex_color: event.target.value })} /></div>
+  const imageInput = (row) => {
+    const preview = row._imagePreview || row.imagen_url
+    return <div className="option-image-control">{preview ? <img src={preview} alt={`Imagen ${row.nombre || 'nueva'}`} /> : <span>Sin imagen</span>}<label className="button button-outline button-small">{row.imagen_url || row._imageFile ? 'Reemplazar imagen' : 'Subir imagen'}<input aria-label={`Imagen ${row.nombre || 'nuevo'}`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => { const file = event.target.files?.[0]; if (file) { if (row._imagePreview) { URL.revokeObjectURL(row._imagePreview); previews.current.delete(row._imagePreview) } const url = URL.createObjectURL(file); previews.current.add(url); change(row.id, { _imageFile: file, _imagePreview: url }) }; event.target.value = '' }} /></label>{(row.imagen_url || row._imageFile) && <button className="button button-danger button-small" type="button" onClick={() => { if (row._imagePreview) { URL.revokeObjectURL(row._imagePreview); previews.current.delete(row._imagePreview) }; change(row.id, { imagen_url: null, _imageFile: null, _imagePreview: null }) }}>Quitar imagen</button>}</div>
+  }
+  return <section className="option-table" aria-labelledby={`options-${definition.key}`}><div className="option-section-heading"><h3 id={`options-${definition.key}`}>{definition.label}</h3><button className="button button-outline button-small" type="button" onClick={addRow}>+ Agregar {definition.addLabel}</button></div>{message && <p className="form-status" role="status">{message}</p>}<div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Nombre</th>{definition.priceColumn && <th>Precio COP</th>}{definition.colorColumn && <th>Color</th>}{definition.image && <th>Imagen</th>}<th>Disponible</th><th>Acción</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} className={`${row._isNew ? 'option-new-row ' : ''}${row._deleted ? 'option-deleted-row' : ''}`}><td><input aria-label={`${definition.label} ${row.nombre || 'nuevo'}`} value={row.nombre} disabled={row._deleted} onChange={(event) => change(row.id, { nombre: event.target.value })} /></td>{definition.priceColumn && <td><input aria-label={`Precio ${row.nombre || 'nuevo'}`} type="number" min="0" value={row[definition.priceColumn]} disabled={row._deleted} onChange={(event) => change(row.id, { [definition.priceColumn]: event.target.value })} /></td>}{definition.colorColumn && <td>{colorInput(row)}</td>}{definition.image && <td>{imageInput(row)}</td>}<td><input aria-label={`Disponible ${row.nombre || 'nuevo'}`} type="checkbox" checked={Boolean(row.disponible)} disabled={row._deleted} onChange={(event) => change(row.id, { disponible: event.target.checked })} /></td><td>{row._deleted ? <button className="button button-outline button-small" type="button" onClick={() => change(row.id, { _deleted: false })}>Deshacer</button> : <button className="button button-danger button-small" type="button" onClick={() => removeRow(row)}>Eliminar</button>}</td></tr>)}</tbody></table></div>{changed && <button className="button button-dark option-save" type="button" onClick={save} disabled={saving}>{saving ? 'Guardando…' : `Guardar ${definition.label.toLocaleLowerCase('es')}`}</button>}</section>
+}
+
+export function OptionsPanel({ client = supabase }) {
   const [catalogs, setCatalogs] = useState({})
   const [settings, setSettings] = useState(null)
   const [message, setMessage] = useState('')
   const refresh = async () => {
-    const requests = await Promise.all([...TABLES.map(({ key }) => supabase.from(key).select('*').order('nombre')), supabase.from('config_manilla').select('*').limit(1)])
+    const requests = await Promise.all([...TABLES.map(({ key }) => client.from(key).select('*').order('nombre')), client.from('config_manilla').select('*').limit(1)])
     const failed = requests.find((result) => result.error)
     if (failed) { setMessage('No fue posible cargar las opciones. Revisa la configuración de Supabase.'); return }
     setCatalogs(Object.fromEntries(TABLES.map(({ key }, index) => [key, requests[index].data || []])))
     setSettings(requests.at(-1).data?.[0] || null)
   }
   useEffect(() => { refresh() }, [])
-  const updateRow = (table, id, values) => setCatalogs((current) => ({ ...current, [table]: current[table].map((row) => row.id === id ? { ...row, ...values } : row) }))
-  const saveRow = async (table, row) => {
-    const definition = TABLES.find((item) => item.key === table)
-    const values = { nombre: row.nombre, disponible: row.disponible }
-    if (definition.priceColumn) values[definition.priceColumn] = Number(row[definition.priceColumn])
-    if (definition.colorColumn) values[definition.colorColumn] = row[definition.colorColumn]
-    if (definition.paletteColumn) values[definition.paletteColumn] = row[definition.paletteColumn]
-    const { error } = await supabase.from(table).update(values).eq('id', row.id)
-    setMessage(error ? 'No se pudo guardar esta opción.' : 'Opción guardada.')
-  }
   const saveSettings = async (event) => {
     event.preventDefault()
-    const { error } = await supabase.from('config_manilla').update({ precio_base: Number(settings.precio_base), min_piedras: Number(settings.min_piedras), max_piedras: Number(settings.max_piedras) }).eq('id', settings.id)
+    const { error } = await client.from('config_manilla').update({ precio_base: Number(settings.precio_base), min_piedras: Number(settings.min_piedras), max_piedras: Number(settings.max_piedras) }).eq('id', settings.id)
     setMessage(error ? 'No se pudo guardar el precio base.' : 'Precio base y límites guardados.')
   }
   return <div className="admin-options">{message && <p className="notice" role="status">{message}</p>}
     {settings && <form className="settings-form" onSubmit={saveSettings}><h3>Configuración de la manilla</h3><label>Precio base<input type="number" min="0" value={settings.precio_base} onChange={(event) => setSettings({ ...settings, precio_base: event.target.value })} /></label><label>Mínimo de piedras<input type="number" min="1" value={settings.min_piedras} onChange={(event) => setSettings({ ...settings, min_piedras: event.target.value })} /></label><label>Máximo de piedras<input type="number" min={settings.min_piedras} value={settings.max_piedras} onChange={(event) => setSettings({ ...settings, max_piedras: event.target.value })} /></label><button className="button button-dark">Guardar ajustes</button></form>}
-    {TABLES.map(({ key, label, priceColumn, colorColumn, paletteColumn }) => <section className="option-table" key={key}><h3>{label}</h3><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Nombre</th>{priceColumn && <th>Precio COP</th>}{colorColumn && <th>Color</th>}{paletteColumn && <th>Colores alternos (hex, separados por coma)</th>}<th>Disponible</th><th /></tr></thead><tbody>{(catalogs[key] || []).map((row) => <tr key={row.id}><td><input aria-label={`${label} ${row.nombre}`} value={row.nombre} onChange={(event) => updateRow(key, row.id, { nombre: event.target.value })} /></td>{priceColumn && <td><input aria-label={`Precio ${row.nombre}`} type="number" min="0" value={row[priceColumn]} onChange={(event) => updateRow(key, row.id, { [priceColumn]: event.target.value })} /></td>}{colorColumn && <td><input aria-label={`Color ${row.nombre}`} type="color" value={row[colorColumn]} onChange={(event) => updateRow(key, row.id, { [colorColumn]: event.target.value })} /></td>}{paletteColumn && <td><input aria-label={`Colores alternos ${row.nombre}`} value={(row[paletteColumn] || []).join(', ')} onChange={(event) => updateRow(key, row.id, { [paletteColumn]: event.target.value.split(',').map((color) => color.trim()).filter(Boolean) })} /></td>}<td><input aria-label={`Disponible ${row.nombre}`} type="checkbox" checked={row.disponible} onChange={(event) => updateRow(key, row.id, { disponible: event.target.checked })} /></td><td><button className="button button-outline button-small" onClick={() => saveRow(key, row)}>Guardar</button></td></tr>)}</tbody></table></div></section>)}
+    {TABLES.map((definition) => <OptionSection key={definition.key} definition={definition} initialRows={catalogs[definition.key] || []} client={client} onMessage={setMessage} />)}
   </div>
 }
 
@@ -288,5 +409,5 @@ export default function Admin() {
   if (!hasSupabase) return <main className="admin-page"><Brand /><div className="setup-card"><span className="eyebrow">CONFIGURACIÓN PENDIENTE</span><h1>Conecta Supabase</h1><p>Agrega <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> en el entorno de Vercel para activar el panel y guardar pedidos. Ejecuta primero <code>supabase/schema.sql</code> en el SQL Editor.</p><a className="button button-dark" href="/">Volver a la tienda</a></div></main>
   if (!authReady) return <main className="admin-page"><p>Cargando panel…</p></main>
   if (!session) return <main className="admin-page"><a className="back-link" href="/">← Volver a la tienda</a><LoginForm /></main>
-  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['opciones', 'Personalización'], ['pedidos', 'Pedidos']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel client={supabase} /> : tab === 'opciones' ? <OptionsPanel /> : <OrdersPanel />}</main>
+  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['categorias', 'Categorías'], ['opciones', 'Personalización'], ['pedidos', 'Pedidos']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel client={supabase} /> : tab === 'categorias' ? <CategoriesPanel client={supabase} /> : tab === 'opciones' ? <OptionsPanel /> : <OrdersPanel />}</main>
 }

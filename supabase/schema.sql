@@ -43,15 +43,14 @@ create table if not exists public.tipos_piedra (
   id text primary key,
   nombre text not null,
   precio_unit integer not null check (precio_unit >= 0),
-  hex_color text not null,
-  colores jsonb not null default '[]'::jsonb,
+  imagen_url text,
   disponible boolean not null default true
 );
 
 create table if not exists public.dijes (
   id text primary key,
   nombre text not null,
-  icono text not null default '✧',
+  imagen_url text,
   disponible boolean not null default true
 );
 
@@ -59,9 +58,20 @@ create table if not exists public.bolas_metal (
   id text primary key,
   nombre text not null,
   precio integer not null check (precio >= 0),
-  hex_color text not null,
+  imagen_url text,
   disponible boolean not null default true
 );
+
+alter table public.tipos_piedra
+  add column if not exists imagen_url text,
+  drop column if exists hex_color,
+  drop column if exists colores;
+alter table public.bolas_metal
+  add column if not exists imagen_url text,
+  drop column if exists hex_color;
+alter table public.dijes
+  add column if not exists imagen_url text,
+  drop column if exists icono;
 
 create table if not exists public.config_manilla (
   id uuid primary key default gen_random_uuid(),
@@ -122,14 +132,14 @@ on conflict (producto_id, url) do nothing;
 insert into public.tipos_tejido (id, nombre) values ('clasico', 'Macramé clásico'), ('trenzado', 'Trenzado') on conflict (id) do nothing;
 insert into public.colores_hilo (id, nombre, hex_color) values
 ('rojo', 'Rojo', '#9b2928'), ('negro', 'Negro', '#282522'), ('azul-noche', 'Azul noche', '#263b70'), ('crema', 'Crema', '#d7c8a7'), ('verde-jade', 'Verde jade', '#47816d'), ('vino', 'Vino', '#672c43') on conflict (id) do nothing;
-insert into public.tipos_piedra (id, nombre, precio_unit, hex_color, colores) values
-('cuarzo-rosa', 'Cuarzo rosa', 3000, '#d890a0', '["#d890a0", "#f0c6ce"]'),
-('ojo-tigre', 'Ojo de tigre', 3500, '#a96532', '["#a96532", "#6d3e24"]'),
-('amatista', 'Amatista', 4000, '#8e71a9', '["#8e71a9", "#c6aade"]'),
-('aventurina', 'Aventurina', 3000, '#5b8b66', '["#5b8b66", "#a2b98b"]'),
-('howlita', 'Howlita', 2500, '#e7e0d4', '["#e7e0d4", "#8cb9c2"]') on conflict (id) do nothing;
-insert into public.dijes (id, nombre, icono) values ('corazon', 'Corazón', '♡'), ('cruz', 'Cruz', '✚') on conflict (id) do nothing;
-insert into public.bolas_metal (id, nombre, precio, hex_color) values ('plata', 'Plata', 4000, '#bbc0c2'), ('oro', 'Oro', 5000, '#caa34a') on conflict (id) do nothing;
+insert into public.tipos_piedra (id, nombre, precio_unit, imagen_url) values
+('cuarzo-rosa', 'Cuarzo rosa', 3000, '/personalizacion/piedras/cuarzo-rosa.svg'),
+('ojo-tigre', 'Ojo de tigre', 3500, '/personalizacion/piedras/ojo-tigre.svg'),
+('amatista', 'Amatista', 4000, '/personalizacion/piedras/amatista.svg'),
+('aventurina', 'Aventurina', 3000, '/personalizacion/piedras/aventurina.svg'),
+('howlita', 'Howlita', 2500, '/personalizacion/piedras/howlita.svg') on conflict (id) do nothing;
+insert into public.dijes (id, nombre, imagen_url) values ('corazon', 'Corazón', '/personalizacion/dijes/corazon.svg'), ('cruz', 'Cruz', '/personalizacion/dijes/cruz.svg') on conflict (id) do nothing;
+insert into public.bolas_metal (id, nombre, precio, imagen_url) values ('plata', 'Plata', 4000, '/personalizacion/bolas/plata.svg'), ('oro', 'Oro', 5000, '/personalizacion/bolas/oro.svg') on conflict (id) do nothing;
 insert into public.config_manilla (id, precio_base, min_piedras, max_piedras) values ('00000000-0000-0000-0000-000000000001', 18000, 3, 10) on conflict (id) do nothing;
 
 alter table public.categorias enable row level security;

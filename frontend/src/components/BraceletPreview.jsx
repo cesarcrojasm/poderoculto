@@ -33,6 +33,7 @@ export default function BraceletPreview({ stones, thread, charm, metal, onMove, 
   const startDrag = (event, key) => {
     event.preventDefault()
     event.stopPropagation()
+    event.currentTarget.focus()
     dragRef.current = key
     dragStartX.current = event.clientX
     suppressClick.current = false
@@ -42,9 +43,18 @@ export default function BraceletPreview({ stones, thread, charm, metal, onMove, 
   const endDrag = (event) => {
     if (!dragRef.current) return
     moveToPointer(event)
+    const key = dragRef.current
+    const wasTap = !suppressClick.current
     dragRef.current = null
     setDraggingKey(null)
-    window.setTimeout(() => { suppressClick.current = false }, 0)
+    suppressClick.current = false
+    if (wasTap) {
+      const element = positionedElements.find((candidate) => candidate.key === key)
+      if (element) {
+        setSelectedKey(element.key)
+        onSelect(element.key, element.kind, false)
+      }
+    }
   }
   const cancelDrag = () => {
     dragRef.current = null
@@ -56,27 +66,18 @@ export default function BraceletPreview({ stones, thread, charm, metal, onMove, 
       event.preventDefault()
       onMove(element.key, clamp(element.item.position + (event.key === 'ArrowRight' ? 0.02 : -0.02)))
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
-      if (element.kind === 'stone') {
-        event.preventDefault()
-        onSelect(element.key, true)
-      }
+      event.preventDefault()
+      onSelect(element.key, element.kind, true)
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
-      onSelect(element.kind === 'stone' ? element.key : null, false)
+      onSelect(element.key, element.kind, false)
     }
-  }
-  const openEditor = (element) => {
-    if (suppressClick.current) { suppressClick.current = false; return }
-    if (draggingKey === element.key) return
-    setSelectedKey(element.key)
-    onSelect(element.kind === 'stone' ? element.key : null, false)
   }
   return <div className="bracelet-preview" aria-label="Vista previa de tu manilla">
     <svg ref={svgRef} viewBox="0 0 360 270" role="group" aria-label={`Manilla con ${stones.length} piedras`} onPointerMove={moveToPointer} onPointerUp={endDrag} onPointerCancel={cancelDrag}>
       <defs>
         <linearGradient id="cord" x1="0" y1="0" x2="1" y2="0"><stop stopColor={thread} /><stop offset=".5" stopColor="#806744" stopOpacity=".45" /><stop offset="1" stopColor={thread} /></linearGradient>
         <radialGradient id="gem"><stop offset="0" stopColor="#fff" stopOpacity=".8" /><stop offset=".48" stopColor="#fff" stopOpacity=".12" /><stop offset="1" stopColor="#33251e" stopOpacity=".22" /></radialGradient>
-        <linearGradient id="metal-bead" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#fff" /><stop offset=".45" stopColor={metal?.color || '#c3c5c7'} /><stop offset="1" stopColor="#777" /></linearGradient>
       </defs>
       <path d="M48 171 C18 143 29 103 100 83 C127 75 148 84 164 99" fill="none" stroke="url(#cord)" strokeWidth="6" strokeLinecap="round" />
       <path d="M312 171 C342 143 331 103 260 83 C233 75 212 84 196 99" fill="none" stroke="url(#cord)" strokeWidth="6" strokeLinecap="round" />
@@ -93,24 +94,19 @@ export default function BraceletPreview({ stones, thread, charm, metal, onMove, 
         const draggableProps = {
           tabIndex: 0,
           role: 'button',
-          'aria-label': element.kind === 'stone' ? `Piedra ${stones.findIndex((stone) => stone.instanceId === element.item.instanceId) + 1}: ${element.item.name || 'piedra'}, mover o editar` : element.kind === 'charm' ? `Dije ${element.item.name}, mover` : `Bola metálica ${element.item.name}, mover`,
+          'aria-label': element.kind === 'stone' ? `Piedra ${stones.findIndex((stone) => stone.instanceId === element.item.instanceId) + 1}: ${element.item.name || 'piedra'}, mover o editar` : element.kind === 'charm' ? `Dije ${element.item.name}, mover o quitar` : `Bola metálica ${element.item.name}, mover o quitar`,
           className: `preview-element preview-${element.kind}${draggingKey === element.key ? ' is-dragging' : ''}${selected ? ' is-selected' : ''}`,
           onPointerDown: (event) => startDrag(event, element.key),
-          onClick: () => openEditor(element),
           onKeyDown: (event) => onKeyDown(event, element),
         }
-        if (element.kind === 'stone') return <g key={element.key} {...draggableProps}>
-          <circle cx={x} cy={y + overlapOffset} r="15" fill={element.item.color} stroke="#9c8158" strokeWidth="1.5" />
-          <circle cx={x} cy={y + overlapOffset} r="15" fill="url(#gem)" />
+        if (element.kind !== 'metal') return <g key={element.key} {...draggableProps}>
+          {element.item.image && <image href={element.item.image} x={x - 15} y={y + overlapOffset - 15} width="30" height="30" preserveAspectRatio="xMidYMid meet" />}
           <circle cx={x} cy={y + overlapOffset} r="19" fill="transparent" />
         </g>
-        if (element.kind === 'charm') return <g key={element.key} {...draggableProps}>
-          <circle cx={x} cy={y + overlapOffset} r="15" fill="#f5f0e5" stroke="#b28d4f" strokeWidth="2" />
-          <text x={x} y={y + overlapOffset + 6} textAnchor="middle" fontSize="20" fill="#9a2828">{element.item.icon || '✧'}</text>
-          <circle cx={x} cy={y + overlapOffset} r="19" fill="transparent" />
-        </g>
+        const clipId = `clip-${element.key}`
         return <g key={element.key} {...draggableProps}>
-          <circle cx={x} cy={y + overlapOffset} r="9" fill="url(#metal-bead)" stroke="#8b734a" strokeWidth="1" />
+          <defs><clipPath id={clipId}><circle cx={x} cy={y + overlapOffset} r="10" /></clipPath></defs>
+          {element.item.image && <image href={element.item.image} x={x - 10} y={y + overlapOffset - 10} width="20" height="20" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipId})`} />}
           <circle cx={x} cy={y + overlapOffset} r="17" fill="transparent" />
         </g>
       })}

@@ -20,11 +20,11 @@ export const PRODUCTS = [
 export const CONFIG = { basePrice: 18000, minStones: 3, maxStones: 10 }
 
 export const STONES = [
-  { id: 'cuarzo-rosa', name: 'Cuarzo rosa', price: 3000, color: '#d890a0', colors: ['#d890a0', '#f0c6ce'] },
-  { id: 'ojo-tigre', name: 'Ojo de tigre', price: 3500, color: '#a96532', colors: ['#a96532', '#6d3e24'] },
-  { id: 'amatista', name: 'Amatista', price: 4000, color: '#8e71a9', colors: ['#8e71a9', '#c6aade'] },
-  { id: 'aventurina', name: 'Aventurina', price: 3000, color: '#5b8b66', colors: ['#5b8b66', '#a2b98b'] },
-  { id: 'howlita', name: 'Howlita', price: 2500, color: '#e7e0d4', colors: ['#e7e0d4', '#8cb9c2'] },
+  { id: 'cuarzo-rosa', name: 'Cuarzo rosa', price: 3000, image: '/personalizacion/piedras/cuarzo-rosa.svg' },
+  { id: 'ojo-tigre', name: 'Ojo de tigre', price: 3500, image: '/personalizacion/piedras/ojo-tigre.svg' },
+  { id: 'amatista', name: 'Amatista', price: 4000, image: '/personalizacion/piedras/amatista.svg' },
+  { id: 'aventurina', name: 'Aventurina', price: 3000, image: '/personalizacion/piedras/aventurina.svg' },
+  { id: 'howlita', name: 'Howlita', price: 2500, image: '/personalizacion/piedras/howlita.svg' },
 ]
 
 export const THREADS = [
@@ -33,5 +33,5 @@ export const THREADS = [
   { name: 'Verde jade', color: '#47816d' }, { name: 'Vino', color: '#672c43' },
 ]
 export const WEAVES = ['Macramé clásico', 'Trenzado']
-export const CHARMS = [{ id: 'corazon', name: 'Corazón', icon: '♡' }, { id: 'cruz', name: 'Cruz', icon: '✚' }]
-export const METALS = [{ id: 'plata', name: 'Plata', price: 4000, color: '#bbc0c2' }, { id: 'oro', name: 'Oro', price: 5000, color: '#caa34a' }]
+export const CHARMS = [{ id: 'corazon', name: 'Corazón', image: '/personalizacion/dijes/corazon.svg' }, { id: 'cruz', name: 'Cruz', image: '/personalizacion/dijes/cruz.svg' }]
+export const METALS = [{ id: 'plata', name: 'Plata', price: 4000, image: '/personalizacion/bolas/plata.svg' }, { id: 'oro', name: 'Oro', price: 5000, image: '/personalizacion/bolas/oro.svg' }]

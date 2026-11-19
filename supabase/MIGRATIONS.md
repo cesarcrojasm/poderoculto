@@ -42,3 +42,9 @@ Edita el SQL creado en `supabase/migrations/`, revisa el diff y el resultado de 
 ## Migración de categorías aplicada manualmente
 
 `20261118110000_add_categories_and_colombian_products.sql` se ejecutó desde SQL Editor y luego se registró en el historial remoto con `supabase migration repair --status applied 20261118110000 --remote`. La lista remota confirma que está aplicada y `supabase db push --dry-run --remote` confirma que la base está al día. No repitas la reparación para esta base.
+
+## Imágenes de opciones del configurador
+
+`20261119110000_personalization_option_images.sql` agregó `imagen_url` a piedras, bolas metálicas y dijes, y eliminó sus columnas antiguas de color/ícono. Antes de aplicarla se confirmó que era la única migración pendiente; ya figura aplicada en el proyecto compartido.
+
+`20261119113000_seed_personalization_demo_images.sql` asigna los SVG de muestra de `frontend/public/personalizacion/` a las filas iniciales de piedras, bolas metálicas y dijes. Ambas migraciones están aplicadas y `supabase db push --dry-run --remote` confirma que el proyecto está al día.

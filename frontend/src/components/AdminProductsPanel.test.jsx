@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ProductsPanel } from './Admin'
+import { CategoriesPanel, ProductsPanel } from './Admin'
 
 const database = { products: [], photos: [], categories: [], storage: new Set(), id: 0 }
 
@@ -139,6 +139,7 @@ describe('admin product management', () => {
     const user = userEvent.setup()
     render(<ProductsPanel client={makeClient()} />)
     const select = await screen.findByLabelText('Categoría Prueba')
+    expect(screen.queryByLabelText('Nueva categoría')).not.toBeInTheDocument()
     expect(select).toHaveValue('')
     await user.selectOptions(select, 'colombiana')
     const productCard = select.closest('.admin-product-card')
@@ -148,16 +149,13 @@ describe('admin product management', () => {
 
   it('creates, renames and deletes categories, reassigning their products to "Sin categoría"', async () => {
     const user = userEvent.setup()
-    render(<ProductsPanel client={makeClient()} />)
-    await screen.findAllByText('0 productos')
+    database.products[0].categoria_id = 'colombiana'
+    render(<CategoriesPanel client={makeClient()} />)
+    await screen.findByText('1 productos')
     await user.type(screen.getByLabelText('Nueva categoría'), 'Edición especial')
     await user.click(screen.getByRole('button', { name: 'Crear categoría' }))
     expect(await screen.findByText('Categoría creada.')).toBeInTheDocument()
     expect(database.categories.some((category) => category.id === 'edicion-especial' && category.nombre === 'Edición especial')).toBe(true)
-    const select = screen.getByLabelText('Categoría Prueba')
-    await user.selectOptions(select, 'colombiana')
-    await user.click(within(select.closest('.admin-product-card')).getByRole('button', { name: 'Guardar' }))
-    await waitFor(() => expect(database.products[0].categoria_id).toBe('colombiana'))
     const nameInput = screen.getByLabelText('Nombre categoría Colombiana')
     const categoryRow = nameInput.closest('.admin-category-row')
     expect(within(categoryRow).getByText('1 productos')).toBeInTheDocument()
@@ -174,7 +172,7 @@ describe('admin product management', () => {
 
   it('rejects a category name that produces a duplicate slug', async () => {
     const user = userEvent.setup()
-    render(<ProductsPanel client={makeClient()} />)
+    render(<CategoriesPanel client={makeClient()} />)
     await screen.findByLabelText('Nombre categoría Clásica')
     await user.type(screen.getByLabelText('Nueva categoría'), 'Clásica')
     await user.click(screen.getByRole('button', { name: 'Crear categoría' }))

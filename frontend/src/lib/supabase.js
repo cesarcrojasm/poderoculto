@@ -22,6 +22,8 @@ export async function loadCategories() {
   return data || []
 }
 
+const demoImage = (folder, id) => `/personalizacion/${folder}/${id}.svg`
+
 export async function loadDesignerOptions() {
   if (!supabase) return null
   const queries = [
@@ -35,10 +37,10 @@ export async function loadDesignerOptions() {
   const settings = config[0]
   return {
     config: { basePrice: Number(settings.precio_base), minStones: settings.min_piedras, maxStones: settings.max_piedras },
-    stones: stones.map((stone) => ({ id: stone.id, name: stone.nombre, price: Number(stone.precio_unit), color: stone.hex_color, colors: stone.colores || [stone.hex_color] })),
+    stones: stones.map((stone) => ({ id: stone.id, name: stone.nombre, price: Number(stone.precio_unit), image: stone.imagen_url || demoImage('piedras', stone.id) })),
     threads: threads.map((thread) => ({ name: thread.nombre, color: thread.hex_color })),
     weaves: weaves.map((weave) => weave.nombre),
-    charms: charms.map((charm) => ({ id: charm.id, name: charm.nombre, icon: charm.icono || '✧' })),
-    metals: metals.map((metal) => ({ id: metal.id, name: metal.nombre, price: Number(metal.precio), color: metal.hex_color })),
+    charms: charms.map((charm) => ({ id: charm.id, name: charm.nombre, image: charm.imagen_url || demoImage('dijes', charm.id) })),
+    metals: metals.map((metal) => ({ id: metal.id, name: metal.nombre, price: Number(metal.precio), image: metal.imagen_url || demoImage('bolas', metal.id) })),
   }
 }
