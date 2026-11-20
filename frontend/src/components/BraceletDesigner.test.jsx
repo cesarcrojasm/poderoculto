@@ -6,6 +6,7 @@ import { makeOrderMessage } from '../lib/commerce'
 import { createDesignPng, downloadDesignPng } from '../lib/shareDesign'
 
 vi.mock('../lib/shareDesign', () => ({ createDesignPng: vi.fn(), downloadDesignPng: vi.fn() }))
+vi.mock('../lib/supabase', () => ({ loadDesignerOptions: vi.fn().mockResolvedValue(null) }))
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 beforeEach(() => { createDesignPng.mockReset(); downloadDesignPng.mockReset() })
