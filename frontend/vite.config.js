@@ -9,7 +9,7 @@ export default defineConfig({
     setupFiles: './src/test/setup.js',
     coverage: {
       provider: 'v8',
-      include: ['src/lib/commerce.js', 'src/lib/adminProducts.js', 'src/lib/cotizaciones.js', 'src/lib/quotePdf.js', 'src/data/catalog.js'],
+      include: ['src/lib/commerce.js', 'src/lib/adminProducts.js', 'src/lib/cotizaciones.js', 'src/lib/quotePdf.js', 'src/lib/quoteImage.js', 'src/lib/fileShare.js', 'src/data/catalog.js'],
       thresholds: { lines: 70, statements: 70, functions: 70, branches: 70 },
     },
   },

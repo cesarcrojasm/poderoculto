@@ -1,4 +1,4 @@
-import { formatPrice, whatsappUrl } from './commerce'
+import { formatPrice } from './commerce'
 
 export const EXPIRATION_OPTIONS = ['1_semana', '15_dias', '1_mes', 'no_expira']
 export const MAX_QUOTE_AMOUNT = 2147483647
@@ -66,10 +66,6 @@ export function formatDate(date, options = {}) {
   return `${formattedDate} - ${time}`
 }
 
-export function formatQuoteWhatsAppMessage(customerName, total, pdfUrl) {
-  return `Hola ${customerName}, aquí tienes tu cotización de Poder Oculto por ${formatPrice(total)}. Puedes verla aquí: ${pdfUrl}`
-}
-
-export function quoteWhatsAppUrl(customer, quote) {
-  return whatsappUrl(customer.celular, formatQuoteWhatsAppMessage(customer.nombre, quote.total, quote.pdf_url))
+export function quoteShareText(customerName, total) {
+  return `Hola ${customerName}, aquí tienes tu cotización de Poder Oculto por ${formatPrice(total)}.`
 }

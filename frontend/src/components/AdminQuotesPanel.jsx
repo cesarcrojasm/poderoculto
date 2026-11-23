@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatPrice } from '../lib/commerce'
-import { calculateDiscountPercent, calculateQuoteTotals, expirationLabel, formatDate, getExpirationDate, MAX_QUOTE_AMOUNT, quoteWhatsAppUrl, summarizeQuoteItems, validateCustomer, validateQuoteLine } from '../lib/cotizaciones'
+import { calculateDiscountPercent, calculateQuoteTotals, expirationLabel, formatDate, getExpirationDate, MAX_QUOTE_AMOUNT, quoteShareText, summarizeQuoteItems, validateCustomer, validateQuoteLine } from '../lib/cotizaciones'
 import { generateQuotePdf } from '../lib/quotePdf'
+import { renderQuotePdfAsPng } from '../lib/quoteImage'
+import { shareOrDownloadFile } from '../lib/fileShare'
 import { supabase } from '../lib/supabase'
 import './admin-cotizaciones.css'
 
@@ -37,11 +39,20 @@ export function QuotesPanel({ client = supabase }) {
   const [createdQuote, setCreatedQuote] = useState(null)
   const [pdfError, setPdfError] = useState('')
   const [retryQuote, setRetryQuote] = useState(null)
+  const [shareTarget, setShareTarget] = useState(null)
+  const [sharingFormat, setSharingFormat] = useState('')
+  const [shareError, setShareError] = useState('')
+  const [shareErrorFormat, setShareErrorFormat] = useState('')
+  const [shareNotice, setShareNotice] = useState('')
+  const wizardRef = useRef(null)
+  const shareDialogRef = useRef(null)
+  const shareTriggerRef = useRef(null)
+  const shareRequestId = useRef(0)
+  const shareAbortController = useRef(null)
   const inlineCustomerInFlight = useRef(false)
   const inlineCustomerId = useRef(null)
   const quoteInsertId = useRef(null)
   const quoteInsertPayload = useRef(null)
-  const wizardRef = useRef(null)
 
   const refresh = async () => {
     setLoading(true)
@@ -64,7 +75,7 @@ export function QuotesPanel({ client = supabase }) {
   }
   useEffect(() => { refresh() }, [])
   useEffect(() => {
-    if (!wizard) return undefined
+    if (!wizard || shareTarget) return undefined
     const dialog = wizardRef.current
     const focusable = () => [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href]')]
     focusable()[0]?.focus()
@@ -84,7 +95,11 @@ export function QuotesPanel({ client = supabase }) {
     }
     dialog.addEventListener('keydown', containFocus)
     return () => dialog.removeEventListener('keydown', containFocus)
-  }, [wizard, step, showNewCustomer, selectedCustomer])
+  }, [wizard, step, showNewCustomer, selectedCustomer, shareTarget])
+  useEffect(() => {
+    if (shareTarget) shareDialogRef.current?.querySelector('button:not([disabled])')?.focus()
+    else shareTriggerRef.current?.focus()
+  }, [shareTarget])
 
   const subtotal = lines.reduce((sum, line) => sum + Number(line.cantidad || 0) * Number(line.precio_unitario || 0), 0)
   const discountValue = discountMode === 'percent'
@@ -288,14 +303,63 @@ export function QuotesPanel({ client = supabase }) {
       setBusy(false)
     }
   }
-  const shareQuote = async (quote, customer) => {
-    const pendingWindow = quote.pdf_url ? null : window.open('about:blank', '_blank')
-    let ready = quote
-    if (!ready.pdf_url) ready = await retryPdf(quote, customer)
-    if (!ready?.pdf_url) { pendingWindow?.close(); return }
-    const url = quoteWhatsAppUrl(customer, ready)
-    if (pendingWindow) pendingWindow.location.href = url
-    else window.open(url, '_blank')
+  const openShareDialog = (quote, customer, event) => {
+    shareTriggerRef.current = event.currentTarget
+    setShareNotice('')
+    setShareError('')
+    setShareErrorFormat('')
+    setShareTarget({ quote, customer })
+  }
+  const closeShareDialog = () => {
+    shareRequestId.current += 1
+    shareAbortController.current?.abort()
+    shareAbortController.current = null
+    setSharingFormat('')
+    setShareTarget(null)
+    setShareError('')
+    setShareErrorFormat('')
+  }
+  const shareQuoteFile = async (format) => {
+    if (!shareTarget || sharingFormat) return
+    const { quote, customer } = shareTarget
+    const requestId = ++shareRequestId.current
+    const controller = new AbortController()
+    shareAbortController.current = controller
+    setSharingFormat(format)
+    setShareError('')
+    setShareErrorFormat('')
+    try {
+      let readyQuote = quote
+      if (!readyQuote.pdf_url) readyQuote = await retryPdf(quote, customer)
+      if (requestId !== shareRequestId.current) return
+      if (!readyQuote?.pdf_url) throw new Error('PDF is unavailable.')
+      const response = await fetch(readyQuote.pdf_url, { signal: controller.signal })
+      if (requestId !== shareRequestId.current) return
+      if (!response.ok) throw new Error('PDF download failed.')
+      const pdfBlob = await response.blob()
+      const isImage = format === 'image'
+      const blob = isImage ? await renderQuotePdfAsPng(await pdfBlob.arrayBuffer()) : pdfBlob
+      if (requestId !== shareRequestId.current) return
+      const extension = isImage ? 'png' : 'pdf'
+      const file = new File([blob], `cotizacion-${new Date(readyQuote.created_at || Date.now()).getTime()}.${extension}`, { type: isImage ? 'image/png' : 'application/pdf' })
+      const result = await shareOrDownloadFile(file, {
+        title: 'Cotización Poder Oculto',
+        text: quoteShareText(customer.nombre, readyQuote.total),
+      })
+      if (requestId !== shareRequestId.current) return
+      if (result === 'downloaded') setShareNotice('Se descargó el archivo. Adjúntalo manualmente en WhatsApp.')
+      setShareTarget(null)
+    } catch {
+      if (requestId === shareRequestId.current) {
+        setShareError('No se pudo preparar el archivo para compartir. Inténtalo de nuevo.')
+        setShareErrorFormat(format)
+      }
+    } finally {
+      if (requestId === shareRequestId.current) {
+        shareAbortController.current = null
+        setSharingFormat('')
+      }
+    }
   }
   const closeSuccess = async () => {
     setWizard(false)
@@ -327,7 +391,7 @@ export function QuotesPanel({ client = supabase }) {
     {!wizard && <><div className="admin-quotes-toolbar"><div><h2 id="quotes-title">Cotizaciones</h2><p>Consulta el historial o crea una nueva cotización para tu cliente.</p></div><button className="button button-primary" onClick={beginWizard}>+ Nueva cotización</button></div>
       <label className="admin-quote-search">Buscar cliente<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nombre del cliente" /></label>
       {message && <p className="notice" role="status">{message}</p>}
-      {loading ? <p>Cargando cotizaciones…</p> : !visibleGroups.length ? <p>{search.trim() ? 'No hay cotizaciones que coincidan con la búsqueda.' : 'Aún no hay cotizaciones registradas.'}</p> : <div className="admin-quote-groups">{visibleGroups.map(([id, group]) => <article className="admin-quote-group" key={id}><button className="admin-quote-group-toggle" aria-expanded={expandedClient === id} onClick={() => setExpandedClient(expandedClient === id ? null : id)}><span className="admin-client-avatar">{group.customer.nombre.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('es')}</span><span><strong>{group.customer.nombre}</strong><small>{group.quotes.length} {group.quotes.length === 1 ? 'cotización' : 'cotizaciones'}</small></span><span aria-hidden="true">{expandedClient === id ? '−' : '+'}</span></button>{expandedClient === id && <div className="admin-quote-history">{group.quotes.map((quote) => <article className="admin-quote-card" key={quote.id}><div><strong>{dateWithTime(quote.created_at)}</strong><span>{formatPrice(quote.total)}</span><small>{expirationLabel(quote.expiracion)}{getExpirationDate(quote.created_at, quote.expiracion) ? ` · hasta ${formatDate(getExpirationDate(quote.created_at, quote.expiracion))}` : ''}</small></div><div className="admin-quote-actions"><button className="button button-outline button-small" onClick={() => shareQuote(quote, group.customer)}>Compartir</button>{quote.pdf_url && <a className="button button-dark button-small" href={quote.pdf_url} target="_blank" rel="noreferrer">Ver PDF</a>}</div>{pdfError && retryQuote?.id === quote.id && <p role="alert">{pdfError} <button className="button button-outline button-small" disabled={busy} onClick={() => retryPdf(quote, group.customer)}>Reintentar PDF</button></p>}</article>)}</div>}</article>)}</div>}
+      {loading ? <p>Cargando cotizaciones…</p> : !visibleGroups.length ? <p>{search.trim() ? 'No hay cotizaciones que coincidan con la búsqueda.' : 'Aún no hay cotizaciones registradas.'}</p> : <div className="admin-quote-groups">{visibleGroups.map(([id, group]) => <article className="admin-quote-group" key={id}><button className="admin-quote-group-toggle" aria-expanded={expandedClient === id} onClick={() => setExpandedClient(expandedClient === id ? null : id)}><span className="admin-client-avatar">{group.customer.nombre.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('es')}</span><span><strong>{group.customer.nombre}</strong><small>{group.quotes.length} {group.quotes.length === 1 ? 'cotización' : 'cotizaciones'}</small></span><span aria-hidden="true">{expandedClient === id ? '−' : '+'}</span></button>{expandedClient === id && <div className="admin-quote-history">{group.quotes.map((quote) => <article className="admin-quote-card" key={quote.id}><div><strong>{dateWithTime(quote.created_at)}</strong><span>{formatPrice(quote.total)}</span><small>{expirationLabel(quote.expiracion)}{getExpirationDate(quote.created_at, quote.expiracion) ? ` · hasta ${formatDate(getExpirationDate(quote.created_at, quote.expiracion))}` : ''}</small></div><div className="admin-quote-actions"><button className="button button-outline button-small" onClick={(event) => openShareDialog(quote, group.customer, event)}>Compartir</button>{quote.pdf_url && <a className="button button-dark button-small" href={quote.pdf_url} target="_blank" rel="noreferrer">Ver PDF</a>}</div>{pdfError && retryQuote?.id === quote.id && <p role="alert">{pdfError} <button className="button button-outline button-small" disabled={busy} onClick={() => retryPdf(quote, group.customer)}>Reintentar PDF</button></p>}</article>)}</div>}</article>)}</div>}
     </>}
     {wizard && <div ref={wizardRef} className="admin-quote-wizard" role="dialog" aria-modal="true" aria-labelledby="quote-wizard-title">
       <div className="admin-wizard-heading"><div><span className="eyebrow">COTIZACIONES · PASO {step} DE 4</span><h2 id="quote-wizard-title">{step === 1 ? 'Seleccionar productos' : step === 2 ? 'Confirmar precios y cantidades' : step === 3 ? 'Datos de la cotización' : busy && !createdQuote?.pdf_url && !pdfError ? 'Generando PDF' : pdfError ? 'Cotización creada' : 'Cotización lista'}</h2></div>{step < 4 && <button className="button button-outline button-small" disabled={busy} onClick={cancelWizard}>Cancelar</button>}</div>
@@ -339,8 +403,23 @@ export function QuotesPanel({ client = supabase }) {
         </div>
         <div className="admin-discount-fields"><label>Descuento (%)<input aria-label="Descuento porcentaje" type="number" min="0" max="100" step="0.01" value={discountPercent} onChange={(event) => updateDiscountPercent(event.target.value)} /></label><label>Descuento (COP)<input aria-label="Descuento valor" type="number" min="0" max={subtotal} step="1" value={discountMode === 'percent' ? Math.round(subtotal * discountPercent / 100) : discountValueInput} onChange={(event) => updateDiscountValue(event.target.value)} /></label></div>
         <label className="admin-concept-field">Concepto<textarea value={concept} onChange={(event) => { setConcept(event.target.value); setConceptEdited(true) }} /></label>{validation && <p role="alert">{validation}</p>}</div><div className="admin-quote-sticky"><button className="button button-outline" onClick={() => setStep(2)}>Volver</button><span>Total: {formatPrice(total)}</span><button className="button button-dark" disabled={!selectedCustomer || busy} onClick={createQuote}>{busy ? 'Creando…' : 'Crear cotización'}</button></div></>}
-      {step === 4 && <div className="admin-quote-success">{busy && !createdQuote?.pdf_url && !pdfError ? <><p role="status">Cotización guardada. Generando el PDF…</p><button className="button button-outline" disabled>Volver a cotizaciones</button></> : <><div aria-hidden="true">✓</div><h3>{pdfError ? 'Cotización creada' : '¡Creaste una cotización!'}</h3><p>{pdfError ? 'La cotización quedó guardada, pero el PDF no está disponible todavía.' : 'Ya está lista para compartir con tu cliente.'}</p>{pdfError && <p role="alert">{pdfError}</p>}{createdQuote?.pdf_url && <button className="button button-primary" onClick={() => shareQuote(createdQuote, selectedCustomer)}>Compartir cotización</button>}{pdfError && <button className="button button-outline" disabled={busy} onClick={() => retryPdf(createdQuote, selectedCustomer)}>{busy ? 'Reintentando…' : 'Reintentar PDF'}</button>}<button className="button button-outline" disabled={busy} onClick={closeSuccess}>Volver a cotizaciones</button></>}</div>}
+      {step === 4 && <div className="admin-quote-success">{busy && !createdQuote?.pdf_url && !pdfError ? <><p role="status">Cotización guardada. Generando el PDF…</p><button className="button button-outline" disabled>Volver a cotizaciones</button></> : <><div aria-hidden="true">✓</div><h3>{pdfError ? 'Cotización creada' : '¡Creaste una cotización!'}</h3><p>{pdfError ? 'La cotización quedó guardada, pero el PDF no está disponible todavía.' : 'Ya está lista para compartir con tu cliente.'}</p>{pdfError && <p role="alert">{pdfError}</p>}{createdQuote && <button className="button button-primary" onClick={(event) => openShareDialog(createdQuote, selectedCustomer, event)}>Compartir cotización</button>}{pdfError && <button className="button button-outline" disabled={busy} onClick={() => retryPdf(createdQuote, selectedCustomer)}>{busy ? 'Reintentando…' : 'Reintentar PDF'}</button>}<button className="button button-outline" disabled={busy} onClick={closeSuccess}>Volver a cotizaciones</button></>}</div>}
     </div>}
+    {shareNotice && <p className="admin-quote-share-notice" role="status">{shareNotice}</p>}
+    {shareTarget && <div className="admin-quote-share-overlay"><div ref={shareDialogRef} className="admin-quote-share-dialog" role="dialog" aria-modal="true" aria-labelledby="quote-share-title" onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeShareDialog(); return }
+      if (event.key !== 'Tab') return
+      const focusable = [...event.currentTarget.querySelectorAll('button:not([disabled])')]
+      if (!focusable.length) return
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus() }
+      else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus() }
+    }}>
+      <div className="admin-quote-share-heading"><h3 id="quote-share-title">Compartir cotización</h3><button type="button" className="admin-quote-share-close" aria-label="Cerrar" onClick={closeShareDialog}>×</button></div>
+      <button type="button" className="admin-quote-share-option" disabled={Boolean(sharingFormat)} onClick={() => shareQuoteFile('image')}><span aria-hidden="true">▧</span>{sharingFormat === 'image' ? 'Preparando imagen…' : 'Compartir como imagen'}</button>
+      <button type="button" className="admin-quote-share-option" disabled={Boolean(sharingFormat)} onClick={() => shareQuoteFile('pdf')}><span aria-hidden="true">▰</span>{sharingFormat === 'pdf' ? 'Preparando PDF…' : 'Compartir como PDF'}</button>
+      {shareError && <p className="admin-quote-share-error" role="alert">{shareError}</p>}
+      {shareError && <button type="button" className="button button-outline" disabled={Boolean(sharingFormat)} onClick={() => shareQuoteFile(shareErrorFormat)}>Reintentar</button>}
+    </div></div>}
   </section>
 }
 

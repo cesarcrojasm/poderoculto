@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateDiscountPercent, calculateQuoteTotals, expirationLabel, formatDate, formatQuoteWhatsAppMessage, getExpirationDate, quoteWhatsAppUrl, summarizeQuoteItems, validateCustomer, validateQuoteLine } from './cotizaciones'
+import { calculateDiscountPercent, calculateQuoteTotals, expirationLabel, formatDate, getExpirationDate, quoteShareText, summarizeQuoteItems, validateCustomer, validateQuoteLine } from './cotizaciones'
 
 describe('quote calculations and validation', () => {
   it('validates and normalizes customer fields', () => {
@@ -36,13 +36,12 @@ describe('quote calculations and validation', () => {
     expect(calculateDiscountPercent(0, 0)).toBe(0)
   })
 
-  it('summarizes lines and formats WhatsApp details', () => {
+  it('summarizes quote lines and formats share text without a PDF link', () => {
     const lines = [{ cantidad: 2, nombre: 'Raíz' }, { cantidad: 1, nombre: 'Lazo' }]
     expect(summarizeQuoteItems(lines)).toBe('2 Raíz, 1 Lazo')
     expect(summarizeQuoteItems()).toBe('')
-    expect(formatQuoteWhatsAppMessage('Ana', 25000, 'https://example.com/q.pdf')).toContain('Hola Ana')
-    expect(formatQuoteWhatsAppMessage('Ana', 25000, 'https://example.com/q.pdf')).toContain('$ 25.000')
-    expect(quoteWhatsAppUrl({ nombre: 'Ana', celular: '+57 300 123 4567' }, { total: 25000, pdf_url: 'https://example.com/q.pdf' })).toContain('wa.me/573001234567')
+    expect(quoteShareText('Ana', 25000)).toBe('Hola Ana, aquí tienes tu cotización de Poder Oculto por $ 25.000.')
+    expect(quoteShareText('Ana', 25000)).not.toContain('http')
   })
 
   it('computes expiration dates including clamped calendar months', () => {

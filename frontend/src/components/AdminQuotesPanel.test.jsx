@@ -1,7 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuotesPanel } from './AdminQuotesPanel'
+import { shareOrDownloadFile } from '../lib/fileShare'
+import { renderQuotePdfAsPng } from '../lib/quoteImage'
+
+vi.mock('../lib/fileShare', () => ({ shareOrDownloadFile: vi.fn() }))
+vi.mock('../lib/quoteImage', () => ({ renderQuotePdfAsPng: vi.fn() }))
 
 const db = { products: [], customers: [], quotes: [], objects: new Set(), id: 0, failUploads: 0, failUpdates: 0, uploadCount: 0, uploadPaths: [], commitThenFailUpload: false, commitThenFailUpdate: 0, commitThenFailCustomerInsert: false, rejectProducts: false, holdQuoteInsert: false, releaseQuoteInsert: null, commitThenRejectInsert: false, holdPdfUpload: false, releasePdfUpload: null }
 function makeClient() {
@@ -98,6 +103,9 @@ beforeEach(() => {
   db.holdPdfUpload = false
   db.releasePdfUpload = null
   vi.stubGlobal('crypto', { randomUUID: () => `random-${++db.id}` })
+  vi.clearAllMocks()
+  shareOrDownloadFile.mockResolvedValue('shared')
+  renderQuotePdfAsPng.mockResolvedValue(new Blob(['png-bytes'], { type: 'image/png' }))
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -250,10 +258,12 @@ describe('admin quote workflows', () => {
     expect(await screen.findByText('¡Creaste una cotización!')).toBeInTheDocument()
   })
 
-  it('creates one snapshot, uploads a PDF, and opens WhatsApp with the link', async () => {
+  it('creates one quote and shares the attached PDF or PNG from either entry point', async () => {
     const user = userEvent.setup()
-    const open = vi.fn()
-    vi.stubGlobal('open', open)
+    const pdfBlob = new Blob(['pdf-bytes'], { type: 'application/pdf' })
+    pdfBlob.arrayBuffer = vi.fn().mockResolvedValue(new ArrayBuffer(8))
+    shareOrDownloadFile.mockResolvedValueOnce('shared').mockResolvedValueOnce('downloaded')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => pdfBlob }))
     render(<QuotesPanel client={makeClient()} />)
     await openWizard(user)
     await pickOneProduct(user)
@@ -276,13 +286,88 @@ describe('admin quote workflows', () => {
     await waitFor(() => expect(db.quotes[0].pdf_url).toContain(`/cotizaciones/${db.quotes[0].id}/`))
     expect(db.objects.size).toBe(1)
     await user.click(screen.getByRole('button', { name: 'Compartir cotización' }))
-    expect(open).toHaveBeenCalledWith(expect.stringContaining('wa.me/3001234567'), '_blank')
-    expect(new URL(open.mock.calls[0][0]).searchParams.get('text')).toContain(db.quotes[0].pdf_url)
+    expect(screen.getByRole('dialog', { name: 'Compartir cotización' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Compartir como imagen' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Compartir como PDF' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Compartir como PDF' }))
+    await waitFor(() => expect(shareOrDownloadFile).toHaveBeenCalledOnce())
+    const pdfFile = shareOrDownloadFile.mock.calls[0][0]
+    expect(pdfFile).toBeInstanceOf(File)
+    expect(pdfFile.type).toBe('application/pdf')
+    expect(pdfFile.name).toMatch(/^cotizacion-.*\.pdf$/)
+    expect(shareOrDownloadFile.mock.calls[0][1].text).not.toContain(db.quotes[0].pdf_url)
     expect(db.uploadCount).toBe(1)
     await user.click(screen.getByRole('button', { name: 'Volver a cotizaciones' }))
     expect(await screen.findByText('1 cotización')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Ana Torres/ }))
     expect(screen.getByRole('link', { name: 'Ver PDF' })).toHaveAttribute('href', db.quotes[0].pdf_url)
+    await user.click(screen.getByRole('button', { name: 'Compartir' }))
+    await user.click(screen.getByRole('button', { name: 'Compartir como imagen' }))
+    await waitFor(() => expect(shareOrDownloadFile).toHaveBeenCalledTimes(2))
+    const imageFile = shareOrDownloadFile.mock.calls[1][0]
+    expect(renderQuotePdfAsPng).toHaveBeenCalledOnce()
+    expect(imageFile).toBeInstanceOf(File)
+    expect(imageFile.type).toBe('image/png')
+    expect(imageFile.name).toMatch(/^cotizacion-.*\.png$/)
+    expect(await screen.findByRole('status')).toHaveTextContent('Se descargó el archivo. Adjúntalo manualmente en WhatsApp.')
+    expect(db.uploadCount).toBe(1)
+  })
+
+  it('retries PDF generation from the share chooser when a new quote has no uploaded PDF', async () => {
+    db.failUploads = 1
+    const user = userEvent.setup()
+    const pdfBlob = new Blob(['pdf-bytes'], { type: 'application/pdf' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => pdfBlob }))
+    render(<QuotesPanel client={makeClient()} />)
+    await openWizard(user)
+    await pickOneProduct(user)
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await user.click(screen.getByRole('button', { name: 'Ana Torres · 3001234567' }))
+    await user.click(screen.getByRole('button', { name: 'Crear cotización' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('La cotización quedó guardada')
+    await user.click(screen.getByRole('button', { name: 'Compartir cotización' }))
+    await user.click(screen.getByRole('button', { name: 'Compartir como PDF' }))
+    await waitFor(() => expect(shareOrDownloadFile).toHaveBeenCalledOnce())
+    expect(db.quotes).toHaveLength(1)
+    expect(db.uploadCount).toBe(2)
+    expect(shareOrDownloadFile.mock.calls[0][0].type).toBe('application/pdf')
+  })
+
+  it('allows closing during preparation and does not share after dismissal', async () => {
+    const user = userEvent.setup()
+    let resolveFetch
+    const fetchMock = vi.fn(() => new Promise((resolve) => { resolveFetch = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    db.quotes = [{ id: 'quote-1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', pdf_url: 'https://example.com/quote.pdf', total: 25000 }]
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Compartir' }))
+    await user.click(screen.getByRole('button', { name: 'Compartir como imagen' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await act(async () => {
+      resolveFetch({ ok: true, blob: vi.fn() })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(screen.queryByRole('dialog', { name: 'Compartir cotización' })).not.toBeInTheDocument()
+    expect(shareOrDownloadFile).not.toHaveBeenCalled()
+  })
+
+  it('keeps the share chooser open on fetch failure and retries the same format', async () => {
+    const user = userEvent.setup()
+    const pdfBlob = new Blob(['pdf-bytes'], { type: 'application/pdf' })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: false, blob: async () => pdfBlob })
+      .mockResolvedValueOnce({ ok: true, blob: async () => pdfBlob }))
+    db.quotes = [{ id: 'quote-1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', pdf_url: 'https://example.com/quote.pdf', total: 25000 }]
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Compartir' }))
+    await user.click(screen.getByRole('button', { name: 'Compartir como PDF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo preparar el archivo')
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
+    await waitFor(() => expect(shareOrDownloadFile).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('dialog', { name: 'Compartir cotización' })).not.toBeInTheDocument()
   })
 
   it('keeps the inserted quote after a PDF error and retries without inserting again', async () => {
