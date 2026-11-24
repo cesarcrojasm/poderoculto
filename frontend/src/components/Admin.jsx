@@ -15,7 +15,7 @@ import AdminSalesPanel from './AdminSalesPanel'
 const TABLES = [
   { key: 'tipos_piedra', label: 'Piedras', addLabel: 'piedra', priceColumn: 'precio_unit', image: true, folder: 'piedras' },
   { key: 'bolas_metal', label: 'Bolas metálicas', addLabel: 'bola metálica', priceColumn: 'precio', image: true, folder: 'bolas' },
-  { key: 'dijes', label: 'Dijes', addLabel: 'dije', image: true, folder: 'dijes' },
+  { key: 'dijes', label: 'Dijes', addLabel: 'dije', priceColumn: 'precio', defaultPrice: 10000, image: true, folder: 'dijes' },
   { key: 'colores_hilo', label: 'Colores de hilo', addLabel: 'color de hilo', colorColumn: 'hex_color' },
   { key: 'tipos_tejido', label: 'Tejidos', addLabel: 'tejido' },
 ]
@@ -282,7 +282,7 @@ function OptionSection({ definition, initialRows, client, onMessage }) {
   }, [initialRows])
   const changed = rows.some((row) => !row._deleted && optionRowChanged(row, baseline.find((item) => item.id === row.id) || {}, definition)) || rows.some((row) => row._deleted)
   const change = (id, values) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...values } : row))
-  const addRow = () => setRows((current) => [...current, { id: crypto.randomUUID(), nombre: '', disponible: true, _isNew: true, _deleted: false, _imageFile: null, ...(definition.priceColumn ? { [definition.priceColumn]: 0 } : {}), ...(definition.colorColumn ? { [definition.colorColumn]: '#ffffff' } : {}), ...(definition.image ? { imagen_url: null } : {}) }])
+  const addRow = () => setRows((current) => [...current, { id: crypto.randomUUID(), nombre: '', disponible: true, _isNew: true, _deleted: false, _imageFile: null, ...(definition.priceColumn ? { [definition.priceColumn]: definition.defaultPrice ?? 0 } : {}), ...(definition.colorColumn ? { [definition.colorColumn]: '#ffffff' } : {}), ...(definition.image ? { imagen_url: null } : {}) }])
   const removeRow = (row) => {
     if (row._isNew) { setRows((current) => current.filter((item) => item.id !== row.id)); return }
     change(row.id, { _deleted: true })

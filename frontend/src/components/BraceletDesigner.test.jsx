@@ -28,12 +28,16 @@ describe('bracelet designer', () => {
     const metalBead = screen.getByRole('button', { name: /bola metálica plata/i })
     expect(metalBead.querySelector('circle[fill="#eee7d8"]')).not.toBeInTheDocument()
     expect(metalBead.querySelector('circle[fill="transparent"]')).toBeInTheDocument()
-    expect(screen.getByText(/29\.500/)).toBeInTheDocument()
+    expect(screen.getByText(/39\.500/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Dije')).toHaveDisplayValue('Corazón · +$ 10.000')
+    expect(screen.queryByText('· incluido')).not.toBeInTheDocument()
+    expect(screen.getByText(/Haz tu propia edición limitada: una sola unidad, hecha exactamente como la soñaste\./)).toBeInTheDocument()
+    expect(screen.queryByText(/La base incluye el tejido y el dije/)).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /agregar mi diseño al carrito/i }))
     expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({
       stones: expect.arrayContaining([expect.objectContaining({ name: 'Howlita', position: 0.5 })]),
       charm: 'corazon', charmPosition: 0.5, metal: 'plata', metalPosition: 0.5,
-    }), 29500)
+    }), 39500)
     expect(onAdd.mock.calls[0][0].stones).toHaveLength(3)
     expect(onAdd.mock.calls[0][0].stones.every((stone) => stone.position === 0.5)).toBe(true)
   })

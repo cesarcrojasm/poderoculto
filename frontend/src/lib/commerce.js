@@ -2,13 +2,14 @@ export function formatPrice(value) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value) || 0)
 }
 
-export function braceletPrice(configuration, config, stones, metals) {
+export function braceletPrice(configuration, config, stones, metals, charms = []) {
   const stonePrices = configuration.stones.reduce((sum, stone) => {
     const catalogStone = stones.find((item) => item.id === stone.stoneId)
     return sum + (catalogStone?.price || 0)
   }, 0)
   const metalPrice = metals.find((item) => item.id === configuration.metalId)?.price || 0
-  return config.basePrice + stonePrices + metalPrice
+  const charmPrice = charms.find((item) => item.id === configuration.charmId)?.price || 0
+  return config.basePrice + stonePrices + metalPrice + charmPrice
 }
 
 export function cartTotal(items) {

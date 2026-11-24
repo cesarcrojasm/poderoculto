@@ -57,9 +57,13 @@ create table if not exists public.tipos_piedra (
 create table if not exists public.dijes (
   id text primary key,
   nombre text not null,
+  precio integer not null default 0 check (precio >= 0),
   imagen_url text,
   disponible boolean not null default true
 );
+
+alter table public.dijes
+  add column if not exists precio integer not null default 0 check (precio >= 0);
 
 create table if not exists public.bolas_metal (
   id text primary key,
@@ -195,7 +199,8 @@ insert into public.tipos_piedra (id, nombre, precio_unit, imagen_url) values
 ('amatista', 'Amatista', 4000, '/personalizacion/piedras/amatista.svg'),
 ('aventurina', 'Aventurina', 3000, '/personalizacion/piedras/aventurina.svg'),
 ('howlita', 'Howlita', 2500, '/personalizacion/piedras/howlita.svg') on conflict (id) do nothing;
-insert into public.dijes (id, nombre, imagen_url) values ('corazon', 'Corazón', '/personalizacion/dijes/corazon.svg'), ('cruz', 'Cruz', '/personalizacion/dijes/cruz.svg') on conflict (id) do nothing;
+insert into public.dijes (id, nombre, precio, imagen_url) values ('corazon', 'Corazón', 10000, '/personalizacion/dijes/corazon.svg'), ('cruz', 'Cruz', 10000, '/personalizacion/dijes/cruz.svg') on conflict (id) do nothing;
+update public.dijes set precio = 10000 where precio = 0;
 insert into public.bolas_metal (id, nombre, precio, imagen_url) values ('plata', 'Plata', 4000, '/personalizacion/bolas/plata.svg'), ('oro', 'Oro', 5000, '/personalizacion/bolas/oro.svg') on conflict (id) do nothing;
 insert into public.config_manilla (id, precio_base, min_piedras, max_piedras) values ('00000000-0000-0000-0000-000000000001', 18000, 3, 10) on conflict (id) do nothing;
 

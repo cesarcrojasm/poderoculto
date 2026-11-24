@@ -33,5 +33,5 @@ export const THREADS = [
   { name: 'Verde jade', color: '#47816d' }, { name: 'Vino', color: '#672c43' },
 ]
 export const WEAVES = ['Macramé clásico', 'Trenzado']
-export const CHARMS = [{ id: 'corazon', name: 'Corazón', image: '/personalizacion/dijes/corazon.svg' }, { id: 'cruz', name: 'Cruz', image: '/personalizacion/dijes/cruz.svg' }]
+export const CHARMS = [{ id: 'corazon', name: 'Corazón', price: 10000, image: '/personalizacion/dijes/corazon.svg' }, { id: 'cruz', name: 'Cruz', price: 10000, image: '/personalizacion/dijes/cruz.svg' }]
 export const METALS = [{ id: 'plata', name: 'Plata', price: 4000, image: '/personalizacion/bolas/plata.svg' }, { id: 'oro', name: 'Oro', price: 5000, image: '/personalizacion/bolas/oro.svg' }]

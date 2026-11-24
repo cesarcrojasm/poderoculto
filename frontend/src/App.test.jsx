@@ -58,6 +58,20 @@ describe('storefront flow', () => {
     })
   })
 
+  it('shows selected charm and metal in the custom bracelet cart summary', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const stoneButton = await screen.findByRole('button', { name: /howlita/i })
+    await user.click(stoneButton)
+    await user.click(stoneButton)
+    await user.click(stoneButton)
+    await user.selectOptions(screen.getByLabelText('Dije'), 'corazon')
+    await user.selectOptions(screen.getByLabelText('Bola metálica'), 'plata')
+    await user.click(screen.getByRole('button', { name: /agregar mi diseño al carrito/i }))
+    const cart = screen.getByRole('dialog', { name: 'Carrito' })
+    expect(within(cart).getByText(/dije Corazón · bola metálica Plata/)).toBeInTheDocument()
+  })
+
   it('continues to WhatsApp with the cart details without asking for customer information', async () => {
     const user = userEvent.setup()
     render(<App />)

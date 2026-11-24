@@ -45,7 +45,7 @@ beforeEach(() => {
   database.rows = {
     tipos_piedra: [{ id: 'howlita', nombre: 'Howlita', precio_unit: 2500, imagen_url: 'https://project.supabase.co/storage/v1/object/public/productos/personalizacion/piedras/old.webp', disponible: true }],
     bolas_metal: [{ id: 'plata', nombre: 'Plata', precio: 4000, imagen_url: 'https://project.supabase.co/storage/v1/object/public/productos/personalizacion/bolas/plata.webp', disponible: true }],
-    dijes: [{ id: 'corazon', nombre: 'Corazón', imagen_url: 'https://project.supabase.co/storage/v1/object/public/productos/personalizacion/dijes/corazon.webp', disponible: true }],
+    dijes: [{ id: 'corazon', nombre: 'Corazón', precio: 10000, imagen_url: 'https://project.supabase.co/storage/v1/object/public/productos/personalizacion/dijes/corazon.webp', disponible: true }],
     colores_hilo: [{ id: 'negro', nombre: 'Negro', hex_color: '#282522', disponible: true }],
     tipos_tejido: [{ id: 'clasico', nombre: 'Macramé clásico', disponible: true }],
   }
@@ -74,6 +74,25 @@ describe('admin personalization options', () => {
     expect(database.storage.has('personalizacion/piedras/howlita/old.webp')).toBe(false)
     expect(database.uploads).toHaveLength(1)
     expect(within(section).queryByRole('button', { name: 'Guardar piedras' })).not.toBeInTheDocument()
+  })
+
+  it('edits charm prices and defaults newly added charms to 10000', async () => {
+    const user = userEvent.setup()
+    render(<OptionsPanel client={makeClient()} />)
+    const section = screen.getByRole('region', { name: 'Dijes' })
+    const charmPrice = await within(section).findByLabelText('Precio Corazón')
+    expect(charmPrice).toHaveValue(10000)
+    await user.clear(charmPrice)
+    await user.type(charmPrice, '12000')
+    await user.click(within(section).getByRole('button', { name: 'Guardar dijes' }))
+    await waitFor(() => expect(database.rows.dijes[0].precio).toBe(12000))
+    await user.click(within(section).getByRole('button', { name: '+ Agregar dije' }))
+    expect(within(section).getByLabelText('Precio nuevo')).toHaveValue(10000)
+    await user.type(within(section).getByLabelText('Dijes nuevo'), 'Cruz nueva')
+    await user.upload(within(section).getByLabelText('Imagen Cruz nueva'), new File(['image'], 'cruz.png', { type: 'image/png' }))
+    await user.click(within(section).getByRole('button', { name: 'Guardar dijes' }))
+    await waitFor(() => expect(database.rows.dijes).toHaveLength(2))
+    expect(database.rows.dijes[1]).toMatchObject({ nombre: 'Cruz nueva', precio: 10000 })
   })
 
   it('keeps deletions pending until section save and supports undo', async () => {

@@ -42,7 +42,7 @@ export default function BraceletDesigner({ onAdd }) {
     charmImage: charms.find((item) => item.id === charm?.id)?.image || '',
     metal: metal?.id || '', metalName: metals.find((item) => item.id === metal?.id)?.name || '', metalPosition: metal?.position ?? 0.5,
   }
-  const total = braceletPrice({ stones, metalId: metal?.id || '' }, config, stoneOptions, metals)
+  const total = braceletPrice({ stones, metalId: metal?.id || '', charmId: charm?.id || '' }, config, stoneOptions, metals, charms)
   const addStone = (stoneId) => {
     if (stones.length >= config.maxStones) return
     setStones((current) => [...current, { instanceId: `stone-${nextId.current++}`, stoneId, position: 0.5 }])
@@ -123,11 +123,11 @@ export default function BraceletDesigner({ onAdd }) {
         <fieldset><legend>3. Agrega piedras <small>({stones.length}/{config.maxStones}; mínimo {config.minStones})</small></legend><div className="stone-picker">{stoneOptions.map((item) => <button type="button" key={item.id} disabled={stones.length >= config.maxStones} onClick={() => addStone(item.id)}><img src={item.image} alt="" />{item.name}<small>+{formatPrice(item.price)}</small></button>)}</div>
           {(stones.length > 0 || charm || metal) && <p className="fine-print">Toca cualquier pieza en el dibujo para quitarla; toca una piedra para cambiar su tipo.</p>}
         </fieldset>
-        <div className="option-grid"><fieldset><legend>4. Dije <small>· incluido</small></legend><select aria-label="Dije" value={charm?.id || ''} onChange={(event) => selectCharm(event.target.value)}><option value="">Sin dije</option>{charms.map((item) => <option key={item.id} value={item.id}>{item.icon} {item.name}</option>)}</select></fieldset>
+        <div className="option-grid"><fieldset><legend>4. Dije</legend><select aria-label="Dije" value={charm?.id || ''} onChange={(event) => selectCharm(event.target.value)}><option value="">Sin dije</option>{charms.map((item) => <option key={item.id} value={item.id}>{item.name} · +{formatPrice(item.price)}</option>)}</select></fieldset>
           <fieldset><legend>5. Bola metálica</legend><select aria-label="Bola metálica" value={metal?.id || ''} onChange={(event) => selectMetal(event.target.value)}><option value="">Sin bola</option>{metals.map((item) => <option key={item.id} value={item.id}>{item.name} · +{formatPrice(item.price)}</option>)}</select></fieldset></div>
         <div className="designer-action-buttons"><button type="button" className="button button-primary add-custom" disabled={stones.length < config.minStones} onClick={() => onAdd(fullConfiguration, total)}>{stones.length < config.minStones ? `Agrega ${config.minStones - stones.length} piedra${config.minStones - stones.length === 1 ? '' : 's'} más` : 'Agregar mi diseño al carrito'} <span aria-hidden="true">→</span></button><button type="button" className="button button-outline share-design" onClick={shareDesign}>Compartir mi diseño <span aria-hidden="true">↗</span></button></div>
         {shareStatus && <p className="form-status" role="status">{shareStatus}</p>}
-        <p className="fine-print">La base incluye el tejido y el dije. El precio de las piedras y la bola se suma individualmente. Arrastra las piezas del dibujo para acomodarlas en la banda.</p>
+        <p className="fine-print">Haz tu propia edición limitada: una sola unidad, hecha exactamente como la soñaste. El precio de las piedras, el dije y la bola se suma individualmente. Arrastra las piezas del dibujo para acomodarlas en la banda.</p>
       </div>
     </div>
   </section>

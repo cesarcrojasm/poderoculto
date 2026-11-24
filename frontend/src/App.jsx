@@ -27,7 +27,7 @@ function CartDrawer({ items, setItems, onClose }) {
     {!items.length ? <div className="empty-cart"><span>✧</span><p>{status || 'Aún no hay piezas en tu carrito.'}</p><button className="button button-dark" onClick={onClose}>Seguir explorando</button></div> : <>
       <ul className="cart-items">{items.map((item) => <li key={item.cartId} className="cart-item">
         <div className="cart-thumb">{item.type === 'custom' ? <span>✧</span> : <img src={item.image} alt="" />}</div>
-        <div className="cart-item-copy"><strong>{item.name}</strong>{item.type === 'custom' && <small>{item.configuration.stones.length} piedras · {item.configuration.thread} · {item.configuration.weave}</small>}<span>{formatPrice(item.price)}</span>
+        <div className="cart-item-copy"><strong>{item.name}</strong>{item.type === 'custom' && <small>{item.configuration.stones.length} piedras · {item.configuration.thread} · {item.configuration.weave}{item.configuration.charmName ? ` · dije ${item.configuration.charmName}` : ''}{item.configuration.metalName ? ` · bola metálica ${item.configuration.metalName}` : ''}</small>}<span>{formatPrice(item.price)}</span>
           {item.type !== 'custom' && <div className="quantity-control"><button aria-label={`Reducir ${item.name}`} onClick={() => updateQuantity(item.cartId, item.quantity - 1)}>−</button><span>{item.quantity}</span><button aria-label={`Aumentar ${item.name}`} onClick={() => updateQuantity(item.cartId, item.quantity + 1)}>＋</button></div>}
         </div><button className="remove-item" aria-label={`Quitar ${item.name}`} onClick={() => removeItem(item.cartId)}>Quitar</button>
       </li>)}</ul>

@@ -8,9 +8,11 @@ describe('commerce helpers', () => {
     expect(formatPrice(undefined)).toContain('0')
   })
 
-  it('adds base, selected stone prices and optional metal', () => {
-    expect(braceletPrice({ stones: [{ stoneId: 'howlita' }, { stoneId: 'ojo-tigre' }], metalId: 'plata' }, CONFIG, STONES, METALS)).toBe(28000)
-    expect(braceletPrice({ stones: [{ stoneId: 'missing' }], metalId: '' }, CONFIG, STONES, METALS)).toBe(18000)
+  it('adds base, selected stone, metal, and optional charm prices', () => {
+    const charms = [{ id: 'corazon', price: 10000 }]
+    expect(braceletPrice({ stones: [{ stoneId: 'howlita' }, { stoneId: 'ojo-tigre' }], metalId: 'plata', charmId: 'corazon' }, CONFIG, STONES, METALS, charms)).toBe(38000)
+    expect(braceletPrice({ stones: [{ stoneId: 'missing' }], metalId: '' }, CONFIG, STONES, METALS, charms)).toBe(18000)
+    expect(braceletPrice({ stones: [], metalId: '', charmId: 'corazon' }, CONFIG, STONES, METALS)).toBe(18000)
   })
 
   it('calculates cart total from item prices and quantities', () => {
