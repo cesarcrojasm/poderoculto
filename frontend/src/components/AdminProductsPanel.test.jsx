@@ -154,7 +154,7 @@ describe('admin product management', () => {
     await user.clear(currentStock)
     await user.type(currentStock, '2147483648')
     await user.click(screen.getAllByRole('button', { name: 'Guardar' })[0])
-    expect(await screen.findByText('El stock debe ser un entero no negativo dentro del límite permitido.')).toBeInTheDocument()
+    expect(await screen.findByText('El stock debe ser un entero dentro del límite permitido.')).toBeInTheDocument()
     expect(database.products[0].stock).toBeUndefined()
 
     await user.click(screen.getByRole('button', { name: /nuevo producto/i }))
@@ -165,6 +165,17 @@ describe('admin product management', () => {
     fireEvent.submit(document.querySelector('.new-product-form'))
     expect(await screen.findByText('El stock debe ser un entero no negativo dentro del límite permitido.')).toBeInTheDocument()
     expect(database.products).toHaveLength(1)
+  })
+
+  it('allows signed integer inventory balances in the product editor', async () => {
+    const user = userEvent.setup()
+    render(<ProductsPanel client={makeClient()} />)
+    const stock = await screen.findByLabelText('Stock Prueba')
+    expect(stock).toHaveAttribute('min', '-2147483648')
+    await user.clear(stock)
+    await user.type(stock, '-3')
+    await user.click(screen.getAllByRole('button', { name: 'Guardar' })[0])
+    await waitFor(() => expect(database.products[0].stock).toBe(-3))
   })
 
   it('deletes individual photos and products after confirmation', async () => {

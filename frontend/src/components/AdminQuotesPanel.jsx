@@ -11,7 +11,7 @@ function dateWithTime(value) {
   return formatDate(value, { hour: '2-digit', minute: '2-digit' })
 }
 
-export function QuotesPanel({ client = supabase }) {
+export function QuotesPanel({ client = supabase, onRegisterSale = () => {} }) {
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
   const [quotes, setQuotes] = useState([])
@@ -19,6 +19,8 @@ export function QuotesPanel({ client = supabase }) {
   const [message, setMessage] = useState('')
   const [search, setSearch] = useState('')
   const [expandedClient, setExpandedClient] = useState(null)
+  const [selectedQuote, setSelectedQuote] = useState(null)
+  const [editingQuote, setEditingQuote] = useState(null)
   const [wizard, setWizard] = useState(false)
   const [step, setStep] = useState(1)
   const [productSearch, setProductSearch] = useState('')
@@ -116,6 +118,8 @@ export function QuotesPanel({ client = supabase }) {
 
   const beginWizard = () => {
     setWizard(true)
+    setSelectedQuote(null)
+    setEditingQuote(null)
     setStep(1)
     quoteInsertId.current = null
     quoteInsertPayload.current = null
@@ -134,7 +138,33 @@ export function QuotesPanel({ client = supabase }) {
     setCreatedQuote(null)
     setPdfError('')
   }
-  const cancelWizard = () => { setWizard(false); setCreatedQuote(null); setStep(1); setValidation('') }
+  const beginEditQuote = (quote) => {
+    const customer = quote.clientes || quote.cliente
+    const editLines = (quote.items || []).map((line) => ({ ...line, producto_id: String(line.producto_id), cantidad: Number(line.cantidad), precio_unitario: Number(line.precio_unitario) }))
+    setSelectedQuote(null)
+    setEditingQuote(quote)
+    setWizard(true)
+    setStep(3)
+    setLines(editLines)
+    setQuantities(Object.fromEntries(editLines.map((line) => [line.producto_id, line.cantidad])))
+    setExpiration(quote.expiracion || 'no_expira')
+    setSelectedCustomer(customer || null)
+    setCustomerSearch('')
+    setShowNewCustomer(false)
+    const savedDiscountPercent = Number(quote.descuento_porcentaje) || 0
+    const savedDiscountValue = Number(quote.descuento_valor) || 0
+    setDiscountPercent(savedDiscountPercent)
+    setDiscountValueInput(savedDiscountValue)
+    setDiscountMode(calculateQuoteTotals(editLines, savedDiscountPercent).descuento_valor === savedDiscountValue ? 'percent' : 'value')
+    setConcept(quote.concepto || '')
+    setConceptEdited(true)
+    setValidation('')
+    setCreatedQuote(null)
+    setPdfError('')
+    quoteInsertId.current = null
+    quoteInsertPayload.current = null
+  }
+  const cancelWizard = () => { setWizard(false); setCreatedQuote(null); setEditingQuote(null); setStep(1); setValidation('') }
   const adjustProduct = (id, amount) => setQuantities((current) => ({ ...current, [id]: Math.max(0, (Number(current[id]) || 0) + amount) }))
   const goToLines = () => {
     const existing = new Map(lines.map((line) => [String(line.producto_id), line]))
@@ -179,7 +209,7 @@ export function QuotesPanel({ client = supabase }) {
   const uploadPdfForQuote = async (quote, customer) => {
     const document = await generateQuotePdf({ ...quote, cliente: customer })
     const blob = document.output('blob')
-    const timestamp = new Date(quote.created_at || Date.now()).getTime()
+    const timestamp = quote._regeneratePdf ? `${Date.now()}-${crypto.randomUUID()}` : new Date(quote.created_at || Date.now()).getTime()
     const path = `${quote.id}/cotizacion-${timestamp}.pdf`
     const storage = client.storage.from('cotizaciones')
     const { error: uploadError } = await storage.upload(path, blob, { contentType: 'application/pdf', upsert: false })
@@ -193,6 +223,16 @@ export function QuotesPanel({ client = supabase }) {
     if (updateError) {
       const { data: savedQuote, error: lookupError } = await client.from('cotizaciones').select('pdf_url').eq('id', quote.id).maybeSingle()
       if (lookupError || savedQuote?.pdf_url !== data.publicUrl) throw updateError
+    }
+    const previousPdfUrl = quote._previousPdfUrl || quote.pdf_url
+    if (quote._regeneratePdf && previousPdfUrl) {
+      try {
+        const oldPath = decodeURIComponent(new URL(previousPdfUrl).pathname.split('/cotizaciones/').at(-1))
+        if (oldPath && oldPath !== path) {
+          const { error: removeError } = await storage.remove([oldPath])
+          if (removeError) setMessage('La cotización se actualizó, pero no se pudo limpiar el PDF anterior de Storage.')
+        }
+      } catch { setMessage('La cotización se actualizó, pero no se pudo limpiar el PDF anterior de Storage.') }
     }
     const updated = { ...quote, pdf_url: data.publicUrl, clientes: customer, cliente: customer }
     setQuotes((current) => current.map((item) => item.id === quote.id ? { ...item, ...updated } : item))
@@ -233,6 +273,17 @@ export function QuotesPanel({ client = supabase }) {
       total,
     }
     try {
+      if (editingQuote) {
+        const { error } = await client.from('cotizaciones').update({ ...payload, pdf_url: null }).eq('id', editingQuote.id)
+        if (error) { setValidation('No se pudo actualizar la cotización. Inténtalo de nuevo.'); return }
+        const quote = { ...editingQuote, ...payload, pdf_url: null, _previousPdfUrl: editingQuote.pdf_url, _regeneratePdf: true, cliente: selectedCustomer, clientes: selectedCustomer }
+        setCreatedQuote(quote)
+        setRetryQuote(quote)
+        setStep(4)
+        await retryPdf(quote, selectedCustomer)
+        await refresh()
+        return
+      }
       const quoteId = quoteInsertId.current || crypto.randomUUID()
       const insertPayload = quoteInsertPayload.current || { id: quoteId, ...payload }
       quoteInsertId.current = quoteId
@@ -365,11 +416,33 @@ export function QuotesPanel({ client = supabase }) {
     setWizard(false)
     setStep(1)
     setCreatedQuote(null)
+    setEditingQuote(null)
     setSelectedCustomer(null)
     setLines([])
     setQuantities({})
     setRetryQuote(null)
     await refresh()
+  }
+  const deleteQuote = async (quote) => {
+    if (quote.estado === 'vendida') { setMessage('No se puede eliminar una cotización vendida. Primero elimina la venta asociada.'); return }
+    if (!window.confirm('¿Eliminar esta cotización? Esta acción no se puede deshacer.')) return
+    try {
+      const { data: linkedSale, error: saleError } = await client.from('ventas').select('id').eq('cotizacion_id', quote.id).maybeSingle()
+      if (saleError) { setMessage('No fue posible verificar si la cotización tiene una venta asociada. Inténtalo de nuevo.'); return }
+      if (linkedSale) { setMessage('No se puede eliminar una cotización vendida. Primero elimina la venta asociada.'); return }
+      const { error } = await client.from('cotizaciones').delete().eq('id', quote.id)
+      if (error) { setMessage('No se pudo eliminar la cotización.'); return }
+      setQuotes((current) => current.filter((item) => item.id !== quote.id))
+      setSelectedQuote(null)
+      if (quote.pdf_url) {
+        const oldPath = decodeURIComponent(new URL(quote.pdf_url).pathname.split('/cotizaciones/').at(-1))
+        if (oldPath) {
+          const { error: removeError } = await client.storage.from('cotizaciones').remove([oldPath])
+          if (removeError) { setMessage('La cotización se eliminó, pero no se pudo eliminar su PDF de Storage.'); return }
+        }
+      }
+      setMessage('Cotización eliminada.')
+    } catch { setMessage('No se pudo completar la eliminación de la cotización.') }
   }
 
   const visibleProducts = products.filter((product) => product.nombre.toLocaleLowerCase('es').includes(productSearch.trim().toLocaleLowerCase('es')))
@@ -388,11 +461,19 @@ export function QuotesPanel({ client = supabase }) {
   const visibleGroups = groups.filter(([, group]) => group.customer.nombre.toLocaleLowerCase('es').includes(search.trim().toLocaleLowerCase('es')))
 
   return <section className="admin-quotes" aria-labelledby="quotes-title">
-    {!wizard && <><div className="admin-quotes-toolbar"><div><h2 id="quotes-title">Cotizaciones</h2><p>Consulta el historial o crea una nueva cotización para tu cliente.</p></div><button className="button button-primary" onClick={beginWizard}>+ Nueva cotización</button></div>
+    {!wizard && !selectedQuote && <><div className="admin-quotes-toolbar"><div><h2 id="quotes-title">Cotizaciones</h2><p>Consulta el historial o crea una nueva cotización para tu cliente.</p></div><button className="button button-primary" onClick={beginWizard}>+ Nueva cotización</button></div>
       <label className="admin-quote-search">Buscar cliente<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nombre del cliente" /></label>
       {message && <p className="notice" role="status">{message}</p>}
-      {loading ? <p>Cargando cotizaciones…</p> : !visibleGroups.length ? <p>{search.trim() ? 'No hay cotizaciones que coincidan con la búsqueda.' : 'Aún no hay cotizaciones registradas.'}</p> : <div className="admin-quote-groups">{visibleGroups.map(([id, group]) => <article className="admin-quote-group" key={id}><button className="admin-quote-group-toggle" aria-expanded={expandedClient === id} onClick={() => setExpandedClient(expandedClient === id ? null : id)}><span className="admin-client-avatar">{group.customer.nombre.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('es')}</span><span><strong>{group.customer.nombre}</strong><small>{group.quotes.length} {group.quotes.length === 1 ? 'cotización' : 'cotizaciones'}</small></span><span aria-hidden="true">{expandedClient === id ? '−' : '+'}</span></button>{expandedClient === id && <div className="admin-quote-history">{group.quotes.map((quote) => <article className="admin-quote-card" key={quote.id}><div><strong>{dateWithTime(quote.created_at)}</strong><span>{formatPrice(quote.total)}</span><small>{expirationLabel(quote.expiracion)}{getExpirationDate(quote.created_at, quote.expiracion) ? ` · hasta ${formatDate(getExpirationDate(quote.created_at, quote.expiracion))}` : ''}</small></div><div className="admin-quote-actions"><button className="button button-outline button-small" onClick={(event) => openShareDialog(quote, group.customer, event)}>Compartir</button>{quote.pdf_url && <a className="button button-dark button-small" href={quote.pdf_url} target="_blank" rel="noreferrer">Ver PDF</a>}</div>{pdfError && retryQuote?.id === quote.id && <p role="alert">{pdfError} <button className="button button-outline button-small" disabled={busy} onClick={() => retryPdf(quote, group.customer)}>Reintentar PDF</button></p>}</article>)}</div>}</article>)}</div>}
+      {loading ? <p>Cargando cotizaciones…</p> : !visibleGroups.length ? <p>{search.trim() ? 'No hay cotizaciones que coincidan con la búsqueda.' : 'Aún no hay cotizaciones registradas.'}</p> : <div className="admin-quote-groups">{visibleGroups.map(([id, group]) => <article className="admin-quote-group" key={id}><button className="admin-quote-group-toggle" aria-expanded={expandedClient === id} onClick={() => setExpandedClient(expandedClient === id ? null : id)}><span className="admin-client-avatar">{group.customer.nombre.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('es')}</span><span><strong>{group.customer.nombre}</strong><small>{group.quotes.length} {group.quotes.length === 1 ? 'cotización' : 'cotizaciones'}</small></span><span aria-hidden="true">{expandedClient === id ? '−' : '+'}</span></button>{expandedClient === id && <div className="admin-quote-history">{group.quotes.map((quote) => <article className="admin-quote-card" key={quote.id}><div><strong>{dateWithTime(quote.created_at)}</strong><span>{formatPrice(quote.total)}</span><small>{quote.estado === 'vendida' ? 'Vendida · ' : ''}{expirationLabel(quote.expiracion)}{getExpirationDate(quote.created_at, quote.expiracion) ? ` · hasta ${formatDate(getExpirationDate(quote.created_at, quote.expiracion))}` : ''}</small></div><div className="admin-quote-actions"><button className="button button-outline button-small" onClick={() => setSelectedQuote({ ...quote, clientes: group.customer })}>Ver detalle</button><button className="button button-outline button-small" onClick={(event) => openShareDialog(quote, group.customer, event)}>Compartir</button>{quote.pdf_url && <a className="button button-dark button-small" href={quote.pdf_url} target="_blank" rel="noreferrer">Ver PDF</a>}</div>{pdfError && retryQuote?.id === quote.id && <p role="alert">{pdfError} <button className="button button-outline button-small" disabled={busy} onClick={() => retryPdf(quote, group.customer)}>Reintentar PDF</button></p>}</article>)}</div>}</article>)}</div>}
     </>}
+    {!wizard && selectedQuote && <div className="admin-quote-detail">
+      <button className="button button-outline button-small" onClick={() => setSelectedQuote(null)}>← Volver a cotizaciones</button>
+      <div className="admin-quote-detail-heading"><div><span className="eyebrow">DETALLE DE COTIZACIÓN</span><h2>{selectedQuote.concepto || 'Cotización'}</h2></div><span className={`admin-quote-status ${selectedQuote.estado === 'vendida' ? 'sold' : ''}`}>{selectedQuote.estado === 'vendida' ? 'Vendida' : 'Creada'}</span></div>
+      <dl className="admin-quote-detail-facts"><div><dt>Vigencia</dt><dd>{expirationLabel(selectedQuote.expiracion)}</dd></div><div><dt>Valor total</dt><dd>{formatPrice(selectedQuote.total)}</dd></div><div><dt>Fecha y hora</dt><dd>{dateWithTime(selectedQuote.created_at)}</dd></div><div><dt>Cliente</dt><dd>{(selectedQuote.clientes || selectedQuote.cliente)?.nombre || 'Sin cliente'}</dd></div><div><dt>Empleado</dt><dd>Paola Ossa</dd></div><div><dt>Referencias totales</dt><dd>{selectedQuote.items?.length || 0}</dd></div></dl>
+      <details className="admin-quote-detail-items"><summary>Listado de productos</summary>{(selectedQuote.items || []).map((item, index) => <div key={`${item.producto_id}-${index}`}><strong>{item.nombre}</strong><span>{item.cantidad} × {formatPrice(item.precio_unitario)} = {formatPrice(item.valor ?? item.cantidad * item.precio_unitario)}</span></div>)}</details>
+      <div className="admin-quote-detail-actions"><button className="button button-outline" onClick={(event) => openShareDialog(selectedQuote, selectedQuote.clientes || selectedQuote.cliente, event)}>Compartir</button>{selectedQuote.pdf_url && <a className="button button-dark" href={selectedQuote.pdf_url} target="_blank" rel="noreferrer">Ver PDF</a>}{selectedQuote.estado !== 'vendida' && <button className="button button-primary" onClick={() => onRegisterSale({ ...selectedQuote, clientes: selectedQuote.clientes || selectedQuote.cliente })}>Registrar venta</button>}<button className="button button-outline" onClick={() => beginEditQuote(selectedQuote)}>Editar</button><button className="button button-danger" onClick={() => deleteQuote(selectedQuote)}>Eliminar</button></div>
+      {message && <p className="notice" role="status">{message}</p>}
+    </div>}
     {wizard && <div ref={wizardRef} className="admin-quote-wizard" role="dialog" aria-modal="true" aria-labelledby="quote-wizard-title">
       <div className="admin-wizard-heading"><div><span className="eyebrow">COTIZACIONES · PASO {step} DE 4</span><h2 id="quote-wizard-title">{step === 1 ? 'Seleccionar productos' : step === 2 ? 'Confirmar precios y cantidades' : step === 3 ? 'Datos de la cotización' : busy && !createdQuote?.pdf_url && !pdfError ? 'Generando PDF' : pdfError ? 'Cotización creada' : 'Cotización lista'}</h2></div>{step < 4 && <button className="button button-outline button-small" disabled={busy} onClick={cancelWizard}>Cancelar</button>}</div>
       {step === 1 && <><label className="admin-quote-search">Buscar producto<input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Nombre del producto" /></label><div className="admin-quote-products">{visibleProducts.map((product) => <article className="admin-quote-product" key={product.id}><img src={product.producto_fotos?.[0]?.url || '/brand/mark.svg'} alt={product.nombre} /><div><strong>{product.nombre}</strong><span>{formatPrice(product.precio)}</span><small className={Number(product.stock) > 0 ? 'stock-available' : 'stock-empty'}>{Number(product.stock) > 0 ? `${product.stock} disponibles` : 'No disponible'}</small></div><div className="admin-quantity-control"><button aria-label={`Disminuir ${product.nombre}`} onClick={() => adjustProduct(product.id, -1)}>−</button><output aria-label={`Cantidad ${product.nombre}`}>{Number(quantities[product.id]) || 0}</output><button aria-label={`Aumentar ${product.nombre}`} onClick={() => adjustProduct(product.id, 1)}>+</button></div></article>)}</div><div className="admin-quote-sticky"><span>{selectedUnitCount} unidades · {formatPrice(selectedSubtotal)}</span><button className="button button-dark" disabled={!selectedUnitCount} onClick={goToLines}>Añadir productos</button></div></>}
@@ -402,8 +483,8 @@ export function QuotesPanel({ client = supabase }) {
           {showNewCustomer && !selectedCustomer && <form className="admin-inline-customer" onSubmit={createInlineCustomer}><label>Nombre *<input required maxLength="100" value={newCustomer.nombre} onChange={(event) => setNewCustomer({ ...newCustomer, nombre: event.target.value })}/></label><label>Celular *<input required minLength="7" maxLength="20" value={newCustomer.celular} onChange={(event) => setNewCustomer({ ...newCustomer, celular: event.target.value })}/></label><label>Dirección<input value={newCustomer.direccion} onChange={(event) => setNewCustomer({ ...newCustomer, direccion: event.target.value })}/></label><button className="button button-dark" type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar y seleccionar'}</button></form>}
         </div>
         <div className="admin-discount-fields"><label>Descuento (%)<input aria-label="Descuento porcentaje" type="number" min="0" max="100" step="0.01" value={discountPercent} onChange={(event) => updateDiscountPercent(event.target.value)} /></label><label>Descuento (COP)<input aria-label="Descuento valor" type="number" min="0" max={subtotal} step="1" value={discountMode === 'percent' ? Math.round(subtotal * discountPercent / 100) : discountValueInput} onChange={(event) => updateDiscountValue(event.target.value)} /></label></div>
-        <label className="admin-concept-field">Concepto<textarea value={concept} onChange={(event) => { setConcept(event.target.value); setConceptEdited(true) }} /></label>{validation && <p role="alert">{validation}</p>}</div><div className="admin-quote-sticky"><button className="button button-outline" onClick={() => setStep(2)}>Volver</button><span>Total: {formatPrice(total)}</span><button className="button button-dark" disabled={!selectedCustomer || busy} onClick={createQuote}>{busy ? 'Creando…' : 'Crear cotización'}</button></div></>}
-      {step === 4 && <div className="admin-quote-success">{busy && !createdQuote?.pdf_url && !pdfError ? <><p role="status">Cotización guardada. Generando el PDF…</p><button className="button button-outline" disabled>Volver a cotizaciones</button></> : <><div aria-hidden="true">✓</div><h3>{pdfError ? 'Cotización creada' : '¡Creaste una cotización!'}</h3><p>{pdfError ? 'La cotización quedó guardada, pero el PDF no está disponible todavía.' : 'Ya está lista para compartir con tu cliente.'}</p>{pdfError && <p role="alert">{pdfError}</p>}{createdQuote && <button className="button button-primary" onClick={(event) => openShareDialog(createdQuote, selectedCustomer, event)}>Compartir cotización</button>}{pdfError && <button className="button button-outline" disabled={busy} onClick={() => retryPdf(createdQuote, selectedCustomer)}>{busy ? 'Reintentando…' : 'Reintentar PDF'}</button>}<button className="button button-outline" disabled={busy} onClick={closeSuccess}>Volver a cotizaciones</button></>}</div>}
+        <label className="admin-concept-field">Concepto<textarea value={concept} onChange={(event) => { setConcept(event.target.value); setConceptEdited(true) }} /></label>{validation && <p role="alert">{validation}</p>}</div><div className="admin-quote-sticky"><button className="button button-outline" onClick={() => setStep(2)}>Volver</button><span>Total: {formatPrice(total)}</span><button className="button button-dark" disabled={!selectedCustomer || busy} onClick={createQuote}>{busy ? (editingQuote ? 'Guardando…' : 'Creando…') : (editingQuote ? 'Guardar cambios' : 'Crear cotización')}</button></div></>}
+      {step === 4 && <div className="admin-quote-success">{busy && !createdQuote?.pdf_url && !pdfError ? <><p role="status">Cotización guardada. Generando el PDF…</p><button className="button button-outline" disabled>Volver a cotizaciones</button></> : <><div aria-hidden="true">✓</div><h3>{editingQuote ? 'Cotización actualizada' : pdfError ? 'Cotización creada' : '¡Creaste una cotización!'}</h3><p>{pdfError ? 'La cotización quedó guardada, pero el PDF no está disponible todavía.' : 'Ya está lista para compartir con tu cliente.'}</p>{pdfError && <p role="alert">{pdfError}</p>}{createdQuote && <button className="button button-primary" onClick={(event) => openShareDialog(createdQuote, selectedCustomer, event)}>Compartir cotización</button>}{pdfError && <button className="button button-outline" disabled={busy} onClick={() => retryPdf(createdQuote, selectedCustomer)}>{busy ? 'Reintentando…' : 'Reintentar PDF'}</button>}<button className="button button-outline" disabled={busy} onClick={closeSuccess}>Volver a cotizaciones</button></>}</div>}
     </div>}
     {shareNotice && <p className="admin-quote-share-notice" role="status">{shareNotice}</p>}
     {shareTarget && <div className="admin-quote-share-overlay"><div ref={shareDialogRef} className="admin-quote-share-dialog" role="dialog" aria-modal="true" aria-labelledby="quote-share-title" onKeyDown={(event) => {

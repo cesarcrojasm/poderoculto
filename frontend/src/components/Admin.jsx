@@ -10,6 +10,7 @@ import { getNextProductOrder, getProductOrderUpdates, getStorageObjectPath, hasU
 import { hasSupabase, supabase } from '../lib/supabase'
 import ClientsPanel from './AdminClientsPanel'
 import QuotesPanel from './AdminQuotesPanel'
+import AdminSalesPanel from './AdminSalesPanel'
 
 const TABLES = [
   { key: 'tipos_piedra', label: 'Piedras', addLabel: 'piedra', priceColumn: 'precio_unit', image: true, folder: 'piedras' },
@@ -48,7 +49,7 @@ function SortableProductCard({ product, categories, onChange, onSave, onUpload, 
       <label>Descripción<textarea aria-label={`Descripción ${product.nombre}`} value={product.descripcion || ''} onChange={(event) => onChange(product.id, 'descripcion', event.target.value)} /></label>
       <label>Código<input aria-label={`Código ${product.nombre}`} value={product.codigo || ''} onChange={(event) => onChange(product.id, 'codigo', event.target.value)} /></label>
       <label>Categoría<select aria-label={`Categoría ${product.nombre}`} value={product.categoria_id || ''} onChange={(event) => onChange(product.id, 'categoria_id', event.target.value || null)}><option value="">Sin categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.nombre}</option>)}</select></label>
-      <div className="admin-product-meta"><label>Precio COP<input aria-label={`Precio ${product.nombre}`} type="number" min="0" step="1" value={product.precio} onChange={(event) => onChange(product.id, 'precio', event.target.value)} /></label><label>Stock<input aria-label={`Stock ${product.nombre}`} type="number" min="0" step="1" value={product.stock ?? 0} onChange={(event) => onChange(product.id, 'stock', event.target.value)} /></label><label className="admin-available"><input aria-label={`Disponible ${product.nombre}`} type="checkbox" checked={product.disponible} onChange={(event) => onChange(product.id, 'disponible', event.target.checked)} /> Disponible</label></div>
+      <div className="admin-product-meta"><label>Precio COP<input aria-label={`Precio ${product.nombre}`} type="number" min="0" step="1" value={product.precio} onChange={(event) => onChange(product.id, 'precio', event.target.value)} /></label><label>Stock<input aria-label={`Stock ${product.nombre}`} type="number" min="-2147483648" max="2147483647" step="1" value={product.stock ?? 0} onChange={(event) => onChange(product.id, 'stock', event.target.value)} /></label><label className="admin-available"><input aria-label={`Disponible ${product.nombre}`} type="checkbox" checked={product.disponible} onChange={(event) => onChange(product.id, 'disponible', event.target.checked)} /> Disponible</label></div>
       <div className="admin-product-actions"><label className="button button-outline button-small upload-button">＋ Agregar fotos<input aria-label={`Subir foto ${product.nombre}`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { onUpload(product, [...(event.target.files || [])]); event.target.value = '' }} /></label><button className="button button-dark button-small" onClick={() => onSave(product)}>Guardar</button><button className="button button-danger button-small" onClick={() => onDelete(product)}>Eliminar producto</button></div>
     </div>
   </article>
@@ -89,7 +90,7 @@ export function ProductsPanel({ client = supabase }) {
   const changeProduct = (id, key, value) => setProducts((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item))
   const saveProduct = async (product) => {
     const stock = Number(product.stock ?? 0)
-    if (!Number.isInteger(stock) || stock < 0 || stock > 2147483647) { setMessage('El stock debe ser un entero no negativo dentro del límite permitido.'); return }
+    if (!Number.isInteger(stock) || stock < -2147483648 || stock > 2147483647) { setMessage('El stock debe ser un entero dentro del límite permitido.'); return }
     const { error } = await client.from('productos').update({ nombre: product.nombre.trim(), descripcion: product.descripcion || '', precio: Number(product.precio), codigo: String(product.codigo || '').trim() || null, stock, disponible: product.disponible, categoria_id: product.categoria_id || null }).eq('id', product.id)
     setMessage(error ? 'No se pudo guardar el producto.' : 'Cambios guardados.')
     if (!error) refresh()
@@ -406,6 +407,7 @@ function OrdersPanel() {
 export default function Admin() {
   const [session, setSession] = useState(null)
   const [tab, setTab] = useState('productos')
+  const [saleQuote, setSaleQuote] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   useEffect(() => {
     if (!supabase) return
@@ -416,5 +418,5 @@ export default function Admin() {
   if (!hasSupabase) return <main className="admin-page"><Brand /><div className="setup-card"><span className="eyebrow">CONFIGURACIÓN PENDIENTE</span><h1>Conecta Supabase</h1><p>Agrega <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> en el entorno de Vercel para activar el panel y guardar pedidos. Ejecuta primero <code>supabase/schema.sql</code> en el SQL Editor.</p><a className="button button-dark" href="/">Volver a la tienda</a></div></main>
   if (!authReady) return <main className="admin-page"><p>Cargando panel…</p></main>
   if (!session) return <main className="admin-page"><a className="back-link" href="/">← Volver a la tienda</a><LoginForm /></main>
-  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['categorias', 'Categorías'], ['opciones', 'Personalización'], ['pedidos', 'Pedidos'], ['clientes', 'Clientes'], ['cotizaciones', 'Cotizaciones']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel client={supabase} /> : tab === 'categorias' ? <CategoriesPanel client={supabase} /> : tab === 'opciones' ? <OptionsPanel /> : tab === 'pedidos' ? <OrdersPanel /> : tab === 'clientes' ? <ClientsPanel client={supabase} /> : <QuotesPanel client={supabase} />}</main>
+  return <main className="admin-page"><div className="admin-heading"><Brand /><div><span className="eyebrow">GESTIÓN DE TIENDA</span><h1>Hola, Poder Oculto</h1></div><button className="button button-outline" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div><div className="admin-tabs" role="tablist">{[['productos', 'Productos'], ['categorias', 'Categorías'], ['opciones', 'Personalización'], ['balance', 'Balance'], ['clientes', 'Clientes'], ['cotizaciones', 'Cotizaciones']].map(([key, title]) => <button role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{title}</button>)}</div>{tab === 'productos' ? <ProductsPanel client={supabase} /> : tab === 'categorias' ? <CategoriesPanel client={supabase} /> : tab === 'opciones' ? <OptionsPanel /> : tab === 'balance' ? <AdminSalesPanel client={supabase} initialQuote={saleQuote} onInitialQuoteHandled={() => setSaleQuote(null)} /> : tab === 'clientes' ? <ClientsPanel client={supabase} /> : <QuotesPanel client={supabase} onRegisterSale={(quote) => { setSaleQuote(quote); setTab('balance') }} />}</main>
 }

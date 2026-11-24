@@ -16,12 +16,13 @@ create table if not exists public.productos (
   created_at timestamptz not null default now(),
   categoria_id text references public.categorias(id) on delete set null,
   codigo text,
-  stock integer not null default 0 check (stock >= 0)
+  stock integer not null default 0
 );
 
 alter table public.productos
   add column if not exists codigo text,
-  add column if not exists stock integer not null default 0 check (stock >= 0);
+  add column if not exists stock integer not null default 0;
+alter table public.productos drop constraint if exists productos_stock_check;
 
 create table if not exists public.producto_fotos (
   id uuid primary key default gen_random_uuid(),
@@ -118,11 +119,36 @@ create table if not exists public.cotizaciones (
   descuento_porcentaje numeric not null default 0 check (descuento_porcentaje >= 0 and descuento_porcentaje <= 100),
   descuento_valor integer not null default 0 check (descuento_valor >= 0 and descuento_valor <= subtotal),
   total integer not null check (total >= 0 and total = subtotal - descuento_valor),
+  estado text not null default 'creada' check (estado in ('creada', 'vendida')),
   pdf_url text,
   created_at timestamptz not null default now()
 );
 create index if not exists cotizaciones_cliente_id_idx on public.cotizaciones (cliente_id);
 create index if not exists cotizaciones_created_at_idx on public.cotizaciones (created_at desc);
+alter table public.cotizaciones add column if not exists estado text not null default 'creada' check (estado in ('creada', 'vendida'));
+
+create table if not exists public.ventas (
+  id uuid primary key default gen_random_uuid(),
+  numero_transaccion bigint generated always as identity unique,
+  cliente_id uuid references public.clientes(id) on delete set null,
+  cotizacion_id uuid references public.cotizaciones(id) on delete set null,
+  fecha date not null default current_date,
+  estado_pago text not null check (estado_pago in ('pagado', 'deuda')),
+  metodo_pago text check (metodo_pago in ('efectivo', 'tarjeta', 'transferencia', 'nequi', 'daviplata', 'otro')),
+  items jsonb not null check (jsonb_typeof(items) = 'array' and jsonb_array_length(items) > 0),
+  subtotal integer not null check (subtotal >= 0),
+  descuento_porcentaje numeric not null default 0 check (descuento_porcentaje >= 0 and descuento_porcentaje <= 100),
+  descuento_valor integer not null default 0 check (descuento_valor >= 0 and descuento_valor <= subtotal),
+  total integer not null check (total >= 0 and total = subtotal - descuento_valor),
+  abono_valor integer not null default 0 check (abono_valor >= 0 and abono_valor <= total),
+  concepto text not null default '',
+  nota text,
+  pdf_url text,
+  created_at timestamptz not null default now()
+);
+create index if not exists ventas_created_at_idx on public.ventas (created_at desc);
+create index if not exists ventas_cliente_id_idx on public.ventas (cliente_id);
+create unique index if not exists ventas_cotizacion_id_unique_idx on public.ventas (cotizacion_id) where cotizacion_id is not null;
 
 insert into public.categorias (id, nombre) values
 ('colombiana', 'Colombiana'), ('clasica', 'Clásica')
@@ -230,10 +256,13 @@ create policy "Authenticated deletes product assets" on storage.objects for dele
 
 alter table public.clientes enable row level security;
 alter table public.cotizaciones enable row level security;
+alter table public.ventas enable row level security;
 drop policy if exists "Authenticated manages clients" on public.clientes;
 create policy "Authenticated manages clients" on public.clientes for all to authenticated using (true) with check (true);
 drop policy if exists "Authenticated manages quotes" on public.cotizaciones;
 create policy "Authenticated manages quotes" on public.cotizaciones for all to authenticated using (true) with check (true);
+drop policy if exists "Authenticated manages sales" on public.ventas;
+create policy "Authenticated manages sales" on public.ventas for all to authenticated using (true) with check (true);
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('cotizaciones', 'cotizaciones', true, 5242880, array['application/pdf'])
@@ -245,3 +274,14 @@ drop policy if exists "Authenticated uploads quote pdfs" on storage.objects;
 create policy "Authenticated uploads quote pdfs" on storage.objects for insert to authenticated with check (bucket_id = 'cotizaciones');
 drop policy if exists "Authenticated deletes quote pdfs" on storage.objects;
 create policy "Authenticated deletes quote pdfs" on storage.objects for delete to authenticated using (bucket_id = 'cotizaciones');
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('ventas', 'ventas', true, 5242880, array['application/pdf'])
+on conflict (id) do update set public = true, file_size_limit = 5242880,
+  allowed_mime_types = array['application/pdf'];
+drop policy if exists "Authenticated lists sale pdfs" on storage.objects;
+create policy "Authenticated lists sale pdfs" on storage.objects for select to authenticated using (bucket_id = 'ventas');
+drop policy if exists "Authenticated uploads sale pdfs" on storage.objects;
+create policy "Authenticated uploads sale pdfs" on storage.objects for insert to authenticated with check (bucket_id = 'ventas');
+drop policy if exists "Authenticated deletes sale pdfs" on storage.objects;
+create policy "Authenticated deletes sale pdfs" on storage.objects for delete to authenticated using (bucket_id = 'ventas');

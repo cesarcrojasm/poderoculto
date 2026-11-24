@@ -8,7 +8,7 @@ import { renderQuotePdfAsPng } from '../lib/quoteImage'
 vi.mock('../lib/fileShare', () => ({ shareOrDownloadFile: vi.fn() }))
 vi.mock('../lib/quoteImage', () => ({ renderQuotePdfAsPng: vi.fn() }))
 
-const db = { products: [], customers: [], quotes: [], objects: new Set(), id: 0, failUploads: 0, failUpdates: 0, uploadCount: 0, uploadPaths: [], commitThenFailUpload: false, commitThenFailUpdate: 0, commitThenFailCustomerInsert: false, rejectProducts: false, holdQuoteInsert: false, releaseQuoteInsert: null, commitThenRejectInsert: false, holdPdfUpload: false, releasePdfUpload: null }
+const db = { products: [], customers: [], quotes: [], sales: [], objects: new Set(), id: 0, failUploads: 0, failUpdates: 0, failQuoteDeletes: 0, failRemoves: 0, uploadCount: 0, uploadPaths: [], commitThenFailUpload: false, commitThenFailUpdate: 0, commitThenFailCustomerInsert: false, rejectProducts: false, holdQuoteInsert: false, releaseQuoteInsert: null, commitThenRejectInsert: false, holdPdfUpload: false, releasePdfUpload: null }
 function makeClient() {
   return {
     from(table) {
@@ -41,6 +41,10 @@ function makeClient() {
               if (db.commitThenFailCustomerInsert) { db.commitThenFailCustomerInsert = false; return Promise.reject(new Error('customer insert response lost')).then(resolve, reject) }
             }
           }
+          if (table === 'ventas' && operation === 'select') {
+            const matching = db.sales.filter((sale) => !filter || sale[filter.key] === filter.value)
+            data = singleRow ? matching[0] || null : matching
+          }
           if (table === 'cotizaciones') {
             if (operation === 'select') {
               const matching = db.quotes.filter((quote) => !filter || quote[filter.key] === filter.value).map((quote) => ({ ...quote, clientes: db.customers.find((customer) => customer.id === quote.cliente_id) })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -58,6 +62,10 @@ function makeClient() {
                 Object.assign(db.quotes.find((quote) => quote[filter.key] === filter.value), values)
                 if (db.commitThenFailUpdate > 0) { db.commitThenFailUpdate -= 1; error = new Error('update response lost') }
               }
+            }
+            if (operation === 'delete') {
+              if (db.failQuoteDeletes > 0) { db.failQuoteDeletes -= 1; error = new Error('delete failed') }
+              else db.quotes = db.quotes.filter((quote) => !filter || quote[filter.key] !== filter.value)
             }
           }
           return Promise.resolve({ data, error }).then(resolve, reject)
@@ -77,7 +85,11 @@ function makeClient() {
         return { error: null }
       },
       download: async (path) => db.objects.has(path) ? { data: new Blob(['pdf']), error: null } : { data: null, error: new Error('not found') },
-      remove: async (paths) => { paths.forEach((path) => db.objects.delete(path)); return { error: null } },
+      remove: async (paths) => {
+        if (db.failRemoves > 0) { db.failRemoves -= 1; return { error: new Error('remove failed') } }
+        paths.forEach((path) => db.objects.delete(path))
+        return { error: null }
+      },
       getPublicUrl: (path) => ({ data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/cotizaciones/${path}` } }),
     }) },
   }
@@ -87,10 +99,13 @@ beforeEach(() => {
   db.products = [{ id: 'p1', nombre: 'Raíz carmesí', descripcion: 'Macramé artesanal', precio: 20000, codigo: 'RC-01', stock: 0, producto_fotos: [{ url: '/products/1.jpg', orden: 1 }] }]
   db.customers = [{ id: 'c1', nombre: 'Ana Torres', celular: '3001234567', direccion: null }]
   db.quotes = []
+  db.sales = []
   db.objects = new Set()
   db.id = 0
   db.failUploads = 0
   db.failUpdates = 0
+  db.failQuoteDeletes = 0
+  db.failRemoves = 0
   db.uploadCount = 0
   db.uploadPaths = []
   db.commitThenFailUpload = false
@@ -452,5 +467,134 @@ describe('admin quote workflows', () => {
     await user.click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(db.customers).toHaveLength(2)
     expect(db.quotes).toHaveLength(0)
+  })
+
+  it('opens quote details and routes an unsold quote to sale registration', async () => {
+    const user = userEvent.setup()
+    const onRegisterSale = vi.fn()
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [{ producto_id: 'p1', nombre: 'Raíz carmesí', cantidad: 1, precio_unitario: 20000, valor: 20000 }], subtotal: 20000, descuento_porcentaje: 0, descuento_valor: 0, total: 20000, estado: 'creada' }]
+    render(<QuotesPanel client={makeClient()} onRegisterSale={onRegisterSale} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    expect(screen.getByText('Referencias totales')).toBeInTheDocument()
+    expect(screen.getByText('Creada')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Registrar venta' }))
+    expect(onRegisterSale).toHaveBeenCalledWith(expect.objectContaining({ id: 'q1', clientes: db.customers[0] }))
+  })
+
+  it('preserves a fixed-value discount when an existing quote is saved unchanged', async () => {
+    const user = userEvent.setup()
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [{ producto_id: 'p1', nombre: 'Raíz carmesí', cantidad: 1000, precio_unitario: 20000, valor: 20000000 }], subtotal: 20000000, descuento_porcentaje: 1.17, descuento_valor: 234567, total: 19765433, estado: 'creada' }]
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(db.quotes[0]).toMatchObject({ descuento_valor: 234567, total: 19765433 }))
+  })
+
+  it('clears the stale PDF link while an edited quote waits for PDF regeneration', async () => {
+    const user = userEvent.setup()
+    const pdfUrl = 'https://project.supabase.co/storage/v1/object/public/cotizaciones/q1/cotizacion-old.pdf'
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [{ producto_id: 'p1', nombre: 'Raíz carmesí', cantidad: 1, precio_unitario: 20000, valor: 20000 }], subtotal: 20000, descuento_porcentaje: 0, descuento_valor: 0, total: 20000, estado: 'creada', pdf_url: pdfUrl }]
+    db.objects.add('q1/cotizacion-old.pdf')
+    db.failUploads = 1
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    await user.clear(screen.getByLabelText('Concepto'))
+    await user.type(screen.getByLabelText('Concepto'), 'Regalo actualizado')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(db.quotes[0]).toMatchObject({ concepto: 'Regalo actualizado', pdf_url: null }))
+    expect(await screen.findByText(/La cotización quedó guardada; puedes reintentar/)).toBeInTheDocument()
+  })
+
+  it('reports a returned Storage error while cleaning the previous quote PDF', async () => {
+    const user = userEvent.setup()
+    const pdfUrl = 'https://project.supabase.co/storage/v1/object/public/cotizaciones/q1/cotizacion-old.pdf'
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [{ producto_id: 'p1', nombre: 'Raíz carmesí', cantidad: 1, precio_unitario: 20000, valor: 20000 }], subtotal: 20000, descuento_porcentaje: 0, descuento_valor: 0, total: 20000, estado: 'creada', pdf_url: pdfUrl }]
+    db.objects.add('q1/cotizacion-old.pdf')
+    db.failRemoves = 1
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    await user.clear(screen.getByLabelText('Concepto'))
+    await user.type(screen.getByLabelText('Concepto'), 'Regalo actualizado')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await user.click(await screen.findByRole('button', { name: 'Volver a cotizaciones' }))
+    expect(await screen.findByText('La cotización se actualizó, pero no se pudo limpiar el PDF anterior de Storage.')).toBeInTheDocument()
+    expect(db.objects.has('q1/cotizacion-old.pdf')).toBe(true)
+  })
+
+  it('blocks deletion if a linked sale exists despite a stale quote status', async () => {
+    const user = userEvent.setup()
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [], total: 100, estado: 'creada' }]
+    db.sales = [{ id: 's1', cotizacion_id: 'q1' }]
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Eliminar' }))
+    expect(await screen.findByText('No se puede eliminar una cotización vendida. Primero elimina la venta asociada.')).toBeInTheDocument()
+    expect(db.quotes).toHaveLength(1)
+  })
+
+  it('preserves the quote PDF if row deletion fails', async () => {
+    const user = userEvent.setup()
+    const pdfUrl = 'https://project.supabase.co/storage/v1/object/public/cotizaciones/q1/cotizacion-old.pdf'
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [], total: 100, estado: 'creada', pdf_url: pdfUrl }]
+    db.objects.add('q1/cotizacion-old.pdf')
+    db.failQuoteDeletes = 1
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Eliminar' }))
+    expect(await screen.findByText('No se pudo eliminar la cotización.')).toBeInTheDocument()
+    expect(db.quotes).toHaveLength(1)
+    expect(db.objects.has('q1/cotizacion-old.pdf')).toBe(true)
+  })
+
+  it('reports a receipt cleanup failure after deleting the quote row', async () => {
+    const user = userEvent.setup()
+    const pdfUrl = 'https://project.supabase.co/storage/v1/object/public/cotizaciones/q1/cotizacion-old.pdf'
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [], total: 100, estado: 'creada', pdf_url: pdfUrl }]
+    db.objects.add('q1/cotizacion-old.pdf')
+    db.failRemoves = 1
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    await user.click(screen.getByRole('button', { name: 'Eliminar' }))
+    expect(await screen.findByText('La cotización se eliminó, pero no se pudo eliminar su PDF de Storage.')).toBeInTheDocument()
+    expect(db.quotes).toHaveLength(0)
+    expect(db.objects.has('q1/cotizacion-old.pdf')).toBe(true)
+  })
+
+  it('edits a quote without changing its status and blocks deletion of a sold quote', async () => {
+    const user = userEvent.setup()
+    db.quotes = [{ id: 'q1', cliente_id: 'c1', created_at: '2026-11-20T15:00:00.000Z', expiracion: 'no_expira', concepto: 'Regalo', items: [{ producto_id: 'p1', nombre: 'Raíz carmesí', cantidad: 1, precio_unitario: 20000, valor: 20000 }], subtotal: 20000, descuento_porcentaje: 0, descuento_valor: 0, total: 20000, estado: 'vendida' }]
+    db.sales = [{ id: 's1', cotizacion_id: 'q1', concepto: 'Sale unchanged', total: 20000 }]
+    render(<QuotesPanel client={makeClient()} />)
+    await user.click(await screen.findByRole('button', { name: /Ana Torres/ }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    expect(screen.queryByRole('button', { name: 'Registrar venta' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    const conceptInput = screen.getByLabelText('Concepto')
+    await user.clear(conceptInput)
+    await user.type(conceptInput, 'Regalo actualizado')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(db.quotes[0].concepto).toBe('Regalo actualizado'))
+    expect(db.quotes[0].estado).toBe('vendida')
+    expect(db.sales[0]).toEqual({ id: 's1', cotizacion_id: 'q1', concepto: 'Sale unchanged', total: 20000 })
+    await user.click(screen.getByRole('button', { name: 'Volver a cotizaciones' }))
+    await user.click(screen.getByRole('button', { name: 'Ver detalle' }))
+    const confirm = vi.spyOn(window, 'confirm')
+    await user.click(screen.getByRole('button', { name: 'Eliminar' }))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(db.quotes).toHaveLength(1)
+    expect(await screen.findByText('No se puede eliminar una cotización vendida. Primero elimina la venta asociada.')).toBeInTheDocument()
   })
 })
